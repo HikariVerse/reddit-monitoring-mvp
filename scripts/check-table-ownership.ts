@@ -31,6 +31,7 @@ const EXPLICIT_OWNERS: Array<{ match: RegExp; owner: string }> = [
   { match: /^monitor_project(?:_source|_batch)?$/, owner: "projects" },
   { match: /^(?:content_saved_query|content_annotation)$/, owner: "workspace" },
   { match: /^feed_user_.+$/, owner: "feed" },
+  { match: /^monitor_project_archive$/, owner: "archive-analysis" },
   { match: /^intel_.+$/, owner: "intelligence" },
   { match: /^ai_.+$/, owner: "ai" },
 ];

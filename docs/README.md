@@ -29,7 +29,7 @@
 
 | ID | 等级 | 规则描述 | 验收出口 |
 | :--- | :--- | :--- | :--- |
-| **PRD-01** | MUST | 检索、列表、导出与统计只读库内已存数据并共享权限交集（`allowedSourceIds`），读路径严禁触发付费采集；全库仅按 `commitContentBatch` 唯一入库。 | 权限一致性与读路径隔离测试 |
+| **PRD-01** | MUST | 在线内容检索、列表、导出与统计只读 PostgreSQL 中已存数据并共享权限交集（`allowedSourceIds`）；探索按项目和来源授权直查外置 R4 归档，读路径严禁触发付费采集；全库仅按 `commitContentBatch` 唯一入库。 | 权限一致性与读路径隔离测试 |
 | **PRD-02** | MUST | 监测先经 `estimate` 预估费用再 `collect`；外部推流（`POST /v1/sources/:id/ingest`）与内部调度清晰分离。 | 估价门禁与推流幂等测试 |
 | **MET-01** | MUST NOT | 将库内样本量或样本内品牌提及占比夸大为“全网声量/全网触达”；`overview` 强制附带 `{ coverage, sampleSize, windowFrom, windowTo, jobSuccessCount, jobFailedCount }` 样本声明。 | 契约响应与前端覆盖条审查 |
 | **MET-02** | MUST | **零伪造曲线与零假零值**：趋势/火花线 `sparkline` 必须源于真实 `content_observation` 或分桶快照（缺测则如实返回空/现有节点，禁拼造假斜率）；X 互动率（ER）明确标注分母口径（`by_views` \| `by_followers`），分母均缺时返回 `null` 而非 `0`；Velocity 前窗无覆盖返回 `deltaPct = null`。 | `intelligence-metrics` 与火花线真实性测试 |

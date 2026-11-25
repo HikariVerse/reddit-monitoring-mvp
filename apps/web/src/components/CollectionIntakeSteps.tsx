@@ -301,6 +301,7 @@ function getTargetGuide(platform: PlatformKey, targetType: TargetTypeKey): Targe
 }
 
 export function IntakeTargetStep({
+  archiveChoice,
   allowedProviders,
   restrictedSources,
   draft,
@@ -309,6 +310,7 @@ export function IntakeTargetStep({
   pending,
   onSelect,
 }: {
+  archiveChoice?: React.ReactNode;
   allowedProviders?: readonly string[];
   restrictedSources?: CollectionSource[];
   draft: ManualTarget;
@@ -335,6 +337,7 @@ export function IntakeTargetStep({
     return (
       <>
         <div>
+          {archiveChoice && <div className="archive-fallback-choice">{archiveChoice}</div>}
           <h2>{t('Choose from allowed targets', '选择授权采集对象')}</h2>
           <p>
             {t(
@@ -456,35 +459,38 @@ export function IntakeTargetStep({
         <fieldset className="intake-fields" disabled={pending}>
           {/* 1. Platform Cards (Zero dropdowns) */}
           <div className="intake-section-block">
-            <div className="intake-field-label">{t('Platform', '选择采集平台')}</div>
-            <div className="intake-card-grid intake-card-grid--3" role="radiogroup" aria-label={t('Platform', '选择采集平台')}>
-              {(['reddit', 'x', 'bluesky'] as const).map((platform) => {
-                const meta = PLATFORM_META[platform];
-                const permitted = isPlatformPermitted(platform);
-                const selected = draft.platform === platform;
-                return (
-                  <button
-                    key={platform}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    disabled={!permitted}
-                    className={`intake-choice-card ${selected ? 'is-selected' : ''}`}
-                    onClick={() => {
-                      const nextType = meta.types.includes(draft.targetType) ? draft.targetType : meta.types[0];
-                      setDraft({ platform, targetType: nextType, targetValue: '' });
-                    }}
-                  >
-                    <div className="intake-choice-top">
-                      <strong>{meta.name}</strong>
-                      <span className={`tag ${permitted ? (selected ? 'tag--mint' : '') : 'tag--line'}`} style={{ fontSize: 10 }}>
-                        {permitted ? t(meta.badgeEn, meta.badgeZh) : t('Restricted by policy', '策略未开放')}
-                      </span>
-                    </div>
-                    <small>{t(meta.descEn, meta.descZh)}</small>
-                  </button>
-                );
-              })}
+            <div className="intake-field-label">{archiveChoice ? t('Data intake method', '选择数据接入方式') : t('Platform', '选择采集平台')}</div>
+            <div className={`intake-card-grid ${archiveChoice ? "intake-card-grid--4" : "intake-card-grid--3"}`} aria-label={t('Data intake method', '选择数据接入方式')}>
+              <div className="intake-online-choices" role="radiogroup" aria-label={t('Platform', '选择采集平台')}>
+                {(['reddit', 'x', 'bluesky'] as const).map((platform) => {
+                  const meta = PLATFORM_META[platform];
+                  const permitted = isPlatformPermitted(platform);
+                  const selected = draft.platform === platform;
+                  return (
+                    <button
+                      key={platform}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      disabled={!permitted}
+                      className={`intake-choice-card ${selected ? 'is-selected' : ''}`}
+                      onClick={() => {
+                        const nextType = meta.types.includes(draft.targetType) ? draft.targetType : meta.types[0];
+                        setDraft({ platform, targetType: nextType, targetValue: '' });
+                      }}
+                    >
+                      <div className="intake-choice-top">
+                        <strong>{meta.name}</strong>
+                        <span className={`tag ${permitted ? (selected ? 'tag--mint' : '') : 'tag--line'}`} style={{ fontSize: 10 }}>
+                          {permitted ? t(meta.badgeEn, meta.badgeZh) : t('Restricted by policy', '策略未开放')}
+                        </span>
+                      </div>
+                      <small>{t(meta.descEn, meta.descZh)}</small>
+                    </button>
+                  );
+                })}
+              </div>
+              {archiveChoice}
             </div>
           </div>
 

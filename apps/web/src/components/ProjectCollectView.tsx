@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { History, Layers } from 'lucide-react';
+import { ArchiveChoice, ArchiveIntake } from './ArchiveWorkspace';
 import {
   useCollectResearchPlanMutation,
   useCollectSourceMutation,
@@ -135,6 +136,7 @@ export function ProjectCollectView({
 }) {
   const { t } = useI18n();
   const readableError = useIntakeError();
+  const [archiveMode, setArchiveMode] = useState(() => new URLSearchParams(initialSearch).get('archive') === '1');
   const [draft, setDraft] = useState(() => readDraft(initialSearch));
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>(() => {
     const id = new URLSearchParams(initialSearch).get('sourceId');
@@ -155,12 +157,13 @@ export function ProjectCollectView({
   const batchProject = project.dataset_mode === 'batch';
   const canModify = writable && batchProject;
 
-  const quotas = useQuotasSummaryQuery(canModify);
+  const quotas = useQuotasSummaryQuery(canModify && !archiveMode);
   const preview = usePreviewResearchPlanMutation();
   const collect = useCollectSourceMutation();
   const collectPlan = useCollectResearchPlanMutation();
-  const jobs = useRecentJobsQuery({ projectId: project.id, limit: 20 }, canModify && flow.step === 'target');
+  const jobs = useRecentJobsQuery({ projectId: project.id, limit: 20 }, canModify && !archiveMode && flow.step === 'target');
 
+  const archiveChoice = writable && !preview.isPending ? <ArchiveChoice onClick={() => setArchiveMode(true)} /> : undefined;
   const policy = quotas.data?.effectivePolicy;
   const canStart = isAdmin || policy?.manualCollectEnabled === true;
 
@@ -334,7 +337,7 @@ export function ProjectCollectView({
     <div className="research-intake">
       <header className="research-intake-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
         <div>
-          <h1>{t('Collect new data for your project', '为项目自主采集新数据')}</h1>
+          <h1>{archiveMode ? t('Connect an archive to this project', '为项目接入归档数据') : t('Collect new data for your project', '为项目自主采集新数据')}</h1>
           <p>
             <strong>{project.name}</strong>
             {batchProject && (
@@ -359,7 +362,14 @@ export function ProjectCollectView({
       </header>
 
       <section ref={heading} tabIndex={-1} className="research-intake-panel" aria-label={t('Project data intake', '项目新数据采集')}>
-        {!canModify ? (
+        {archiveMode && writable ? (
+          <>
+            <div>
+              <Button type="button" variant="outline" onClick={() => setArchiveMode(false)}>{t('Back to intake methods', '返回接入方式')}</Button>
+            </div>
+            <ArchiveIntake key={project.id} project={project.id} isAdmin={isAdmin} onNavigate={onNavigate} />
+          </>
+        ) : !canModify ? (
           <>
             <h2>{writable ? t('Data comes from linked sources', '当前项目按关联来源汇集数据') : t('Read-only shared project', '当前为共享只读项目')}</h2>
             <p>
@@ -373,6 +383,7 @@ export function ProjectCollectView({
                     '你可以完整分析与检索此共享项目；如需自主发起新采集，可前往「全部项目」新建私有研究项目。',
                   )}
             </p>
+            {archiveChoice && <div className="archive-fallback-choice">{archiveChoice}</div>}
             <div className="intake-actions">
               <Button type="button" className="intake-primary" onClick={() => onNavigate(path('overview'))}>
                 {t('View content research', '进入内容研究')}
@@ -385,16 +396,23 @@ export function ProjectCollectView({
             </div>
           </>
         ) : !canStart && quotas.isPending ? (
-          <Skeleton role="status" aria-label={t('Checking account permissions', '正在检查账号采集权限')} className="intake-loading" />
+          <>
+            {archiveChoice}
+            <Skeleton role="status" aria-label={t('Checking account permissions', '正在检查账号采集权限')} className="intake-loading" />
+          </>
         ) : !canStart && quotas.isError ? (
-          <Alert role="alert">
-            {readableError(quotas.error)}{' '}
-            <Button type="button" variant="outline" onClick={() => void quotas.refetch()}>
-              {t('Retry', '重试')}
-            </Button>
-          </Alert>
+          <>
+            {archiveChoice}
+            <Alert role="alert">
+              {readableError(quotas.error)}{' '}
+              <Button type="button" variant="outline" onClick={() => void quotas.refetch()}>
+                {t('Retry', '重试')}
+              </Button>
+            </Alert>
+          </>
         ) : !canStart && policy ? (
           <>
+            <div className="archive-fallback-choice">{archiveChoice}</div>
             <Alert role="status">
               {t(
                 'Manual on-demand collection is disabled under your current Ops plan policy. You can still attach shared or previously authorized data batches in "Data Batches".',
@@ -432,6 +450,7 @@ export function ProjectCollectView({
             {flow.step === 'target' && !restriction && (
               <>
                 <IntakeTargetStep
+                  archiveChoice={archiveChoice}
                   allowedProviders={isAdmin ? undefined : policy?.allowedProviders}
                   restrictedSources={restrictedSources}
                   draft={draft}

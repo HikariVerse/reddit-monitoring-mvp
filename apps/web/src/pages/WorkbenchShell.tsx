@@ -53,7 +53,7 @@ import { type Actor, type CapabilitiesResponse, validateSearchTerm } from '../co
 import { useI18n } from '../i18n/translations';
 import { isResearchSource } from '../lib/collectionLimits';
 
-export type WorkbenchRoute = '/app/feed' | '/projects' | '/content' | '/sources' | '/workspace' | '/assistant' | '/settings' | '/admin/queue';
+export type WorkbenchRoute = '/app/feed' | '/explore' | '/projects' | '/content' | '/sources' | '/workspace' | '/assistant' | '/settings' | '/admin/queue';
 
 interface WorkbenchShellProps {
   actor: Actor | null;
@@ -93,7 +93,8 @@ function computeQuotaStats(
   return { pct, used: fmt(totalUsed), cap: fmt(totalCap), status: pct >= 100 ? 'exhausted' : pct >= 80 ? 'warning' : 'normal' };
 }
 
-function resolveShellActiveDomain(route: string, canWrite: boolean): 'feed' | 'research' | 'ops' | 'assistant' | 'settings' {
+function resolveShellActiveDomain(route: string, canWrite: boolean): 'feed' | 'research' | 'explore' | 'ops' | 'assistant' | 'settings' {
+  if (route === '/explore') return 'explore';
   if (route === '/assistant') return 'assistant';
   if (route === '/settings') return 'settings';
   if (route === '/app/feed') return 'feed';
@@ -358,6 +359,7 @@ export function WorkbenchShell({
       { group: t('Feed', '信息流'), label: t('Product Guide', '产品使用说明'), kbd: 'G U', run: () => navigateAndClose('/guide') },
       { group: t('Navigate', '页面跳转'), label: t('Content Research', '内容研究'), kbd: 'G O', run: () => navigateAndClose('/projects') },
       { group: t('Navigate', '页面跳转'), label: t('Intelligence Insights (V2)', '智能监测洞察 (V2)'), kbd: 'G V', run: () => navigateAndClose('/projects?view=intelligence') },
+      { group: t('Navigate', '页面跳转'), label: t('Explore', '探索'), run: () => navigateAndClose('/explore') },
       { group: t('Navigate', '页面跳转'), label: t('Content Search', '内容检索'), kbd: 'G E', run: () => navigateAndClose('/content') },
       ...(canWrite
         ? [
@@ -488,6 +490,17 @@ export function WorkbenchShell({
           >
             <FolderKanban size={22} strokeWidth={1.75} aria-hidden="true" />
             <span>{t('Research', '研究')}</span>
+          </button>
+          <button
+            type="button"
+            className={`rail-btn rail-domain ${activeDomain === 'explore' ? 'is-active' : ''}`}
+            onClick={() => navigateDomain(resolvedProject ? `/explore?projectId=${encodeURIComponent(resolvedProject.id)}` : '/explore')}
+            title={t('Explore', '探索')}
+            aria-label={t('Explore', '探索')}
+            aria-current={activeDomain === 'explore' ? 'page' : undefined}
+          >
+            <Search size={22} strokeWidth={1.75} aria-hidden="true" />
+            <span>{t('Explore', '探索')}</span>
           </button>
           {canWrite && (
             <button
@@ -667,7 +680,9 @@ export function WorkbenchShell({
           ) : (
             <div className="side-context side-context-head">
               <div className="side-domain-title">
-                {activeDomain === 'ops'
+                {activeDomain === 'explore'
+                  ? t('Explore', '探索')
+                  : activeDomain === 'ops'
                   ? t('Operations Admin', '运维管理')
                   : activeDomain === 'settings'
                     ? t('Account & Settings', '账户与设置')
@@ -678,7 +693,9 @@ export function WorkbenchShell({
                         : t('Information Feed', '资讯信息流')}
               </div>
               <p className="side-domain-desc">
-                {activeDomain === 'ops'
+                {activeDomain === 'explore'
+                  ? t('Offline Reddit archives', '离线 Reddit 归档')
+                  : activeDomain === 'ops'
                   ? t('Manage collection sources, schedules & channel policies.', '管理采集来源、调度与渠道策略。')
                   : activeDomain === 'settings'
                     ? t('Manage account access, quotas & appearance.', '管理账户、权限和工作台外观。')
@@ -694,6 +711,13 @@ export function WorkbenchShell({
 
         {/* Domain-Scoped Secondary Navigation */}
         <nav className="side-nav" aria-label={t('Primary navigation', '工作台导航')}>
+          {activeDomain === 'explore' && (
+            <button type="button" className="nav-item is-active" aria-current="page"
+              onClick={() => navigateAndClose(currentSearch ? '/explore?' + currentSearch : '/explore')}>
+              <Search size={17} className="nav-ic" aria-hidden="true" />
+              <span>{t('Archive Explore', '归档探索')}</span>
+            </button>
+          )}
           {activeDomain === 'feed' && (
             <>
               <div className="nav-group">

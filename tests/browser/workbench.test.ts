@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { existsSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
+import { tmpdir } from "node:os";
+import { promisify } from "node:util";
 import test from "node:test";
 import { chromium, type Response as BrowserResponse } from "playwright";
 import { buildApp } from "../../apps/api/src/app";
@@ -1834,5 +1836,242 @@ test("browser: Stage 2 V2 feed stream/hot, Semrush intelligence analytics & Ops 
     }
   }
 
+  assert.deepEqual(errors, []);
+});
+
+
+test("Archive intake links a project, opens Explore and resets the range on project switch", async t => {
+  const db = await testDatabase();
+  t.after(db.close);
+  const password = "archive-browser-password-123";
+  await bootstrapOwner(db.pool, password, "archive-browser@localhost");
+  const sourceId = "346bdf49-cd2f-4502-8210-9a68d8b206be";
+  const active = "2fcdedd7-e13a-4027-b499-dbabf244250a";
+  const empty = "98502fa7-ad59-4414-839d-1919c9232192";
+  await db.pool.query(
+    `INSERT INTO collection_source(id,platform_id,primary_provider,delivery_mode,label,target,content_kind,state,tags,created_at,updated_at)
+     SELECT $1,id,'external_ingest','push','Reddit R4','{"type":"search","query":"archive"}','post',
+       'active',ARRAY['reddit-archive'],now(),now() FROM source WHERE code='reddit'`, [sourceId],
+  );
+  await db.pool.query(
+    `INSERT INTO monitor_project(id,name,dataset_mode) VALUES ($1,'Archive research','batch'),($2,'Other research','batch')`,
+    [active, empty],
+  );
+
+  const liveRoot = process.env.R4_BROWSER_ARCHIVE_ROOT;
+  const pluginPort = await freePort();
+  const pluginUrl = `http://127.0.0.1:${pluginPort}`;
+  const token = "archive-browser-local-service-fixture".repeat(2);
+  const python = process.env.R4_BROWSER_PYTHON ?? "python";
+  const pluginPath = path.resolve("plugins/zst-archive");
+  let plugin: ReturnType<typeof spawn> | undefined;
+  const stopArchive = async () => {
+    if (!plugin || plugin.exitCode !== null || plugin.signalCode !== null) return;
+    const exited = once(plugin, "exit");
+    plugin.kill();
+    await exited;
+  };
+  const startArchive = async (root: string) => {
+    plugin = spawn(python, ["-m", "zst_archive.service", "--port", String(pluginPort)], {
+      env: {
+        ...process.env, PYTHONPATH: pluginPath, ARCHIVE_ROOT: root,
+        ARCHIVE_SERVICE_TOKEN: token, ARCHIVE_DUCKDB_THREADS: "8", ARCHIVE_DUCKDB_MEMORY_LIMIT: "32GB",
+        ARCHIVE_QUERY_TIMEOUT_SECONDS: "7",
+      }, stdio: "ignore",
+    });
+    let ready = false;
+    for (let attempt = 0; attempt < 60 && !ready; attempt++) {
+      ready = await fetch(pluginUrl + "/health", { headers: { authorization: "Bearer " + token } })
+        .then(res => res.ok, () => false);
+      if (!ready) await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.ok(ready, "Archive plugin failed to start");
+  };
+  if (liveRoot) {
+    t.after(stopArchive);
+    await startArchive(liveRoot);
+  } else {
+    const { createServer: httpServer } = await import("node:http");
+    const item = {
+      month: "2026-10", doc_id: 1, content_key: "reddit:post:test", title: "Archive evidence fixture",
+      body: "Parquet fixture excerpt", community: "dataengineering", created_utc: 1791000000,
+      author_key: null, score: 3, reported_comments: 6, is_truncated: false,
+    };
+    const fixture = httpServer((req, res) => {
+      assert.equal(req.headers.authorization, "Bearer " + token);
+      req.resume();
+      const body = JSON.stringify(
+        req.url === "/archives" ? {
+          archiveId: "reddit-local-corpus", version: "e".repeat(64),
+          months: [{ month: "2026-10", from: "2026-10-01T00:00:00Z", to: "2026-11-01T00:00:00Z", postsRows: 1, commentsRows: 1 }],
+        } : req.url === "/evidence" ? {
+          post: item, archivedComments: 1, commentsTruncated: false, comment: null,
+          comments: [{ month: item.month, comment_id: "fixture", post_doc_id: item.doc_id, parent_key: null,
+            created_utc: item.created_utc, author_key: null, score: 2, body: "Archive comment fixture", is_truncated: false }],
+        } : { posts: [item], nextCursor: null, totalMatches: 1, sampleSize: 1, isTruncated: false, months: [item.month] },
+      );
+      res.writeHead(200, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
+      res.end(body);
+    });
+    fixture.listen(pluginPort, "127.0.0.1");
+    await once(fixture, "listening");
+    t.after(() => fixture.close());
+  }
+
+  const port = await freePort();
+  const origin = `http://127.0.0.1:${port}`;
+  const env = {
+    ARCHIVE_ANALYSIS_ENABLED: "true", ARCHIVE_ANALYSIS_SOURCE_ID: sourceId,
+    ARCHIVE_ANALYSIS_BASE_URL: pluginUrl, ARCHIVE_ANALYSIS_SERVICE_TOKEN: token,
+  };
+  const previous = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
+  Object.assign(process.env, env);
+  const app = await buildApp({ pool: db.pool, origin, secureCookies: false, providers: [],
+    sessionSecret: "archive-browser-session-fixture".repeat(2) });
+  for (const [key, value] of Object.entries(previous)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  t.after(() => app.close());
+  const address = await app.listen({ host: "127.0.0.1", port: 0 });
+  await launchVite(t, address, port, origin);
+  const browser = await chromium.launch({ executablePath: resolveChromiumPath(), args: ["--no-sandbox"] });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const request = (method: "get" | "post" | "delete", url: string, data?: object) =>
+    page.request[method](origin + "/api/v1" + url, { headers: { origin }, data });
+  const capture = async (name: string) => {
+    if (process.env.R4_BROWSER_CAPTURE !== "1") return;
+    const directory = "output/validation/r4";
+    await mkdir(directory, { recursive: true });
+    await page.screenshot({ path: directory + "/" + name + ".png" });
+  };
+  const snapshot = async () => (await db.pool.query(`SELECT
+    (SELECT count(*) FROM content) AS content, (SELECT count(*) FROM content_discovery) AS discoveries,
+    (SELECT count(*) FROM collection_batch_item) AS items, (SELECT count(*) FROM source_collection_job) AS jobs,
+    (SELECT count(*) FROM source_provider_usage) AS usage`)).rows[0];
+  const before = await snapshot();
+  await page.goto(origin + "/explore");
+  try {
+    await page.getByRole("button", { name: "登录工作台", exact: true }).waitFor({ timeout: 12_000 });
+  } catch (error) {
+    await capture("00-auth-state");
+    throw new Error(`Explore login gate did not render. Browser errors: ${errors.join(", ")}. Body: ${(await page.locator("body").innerText()).slice(0, 1500)}`, { cause: error });
+  }
+  assert.equal((await request("post", "/auth/login", { email: "archive-browser@localhost", password })).status(), 200);
+
+  await page.goto(origin + "/projects?view=collect&projectId=" + active);
+  const platform = page.getByRole("radiogroup", { name: "选择采集平台" });
+  await platform.getByRole("radio", { name: /Reddit/ }).waitFor();
+  assert.equal(await platform.getByRole("radio").count(), 3);
+  await page.getByRole("button", { name: /离线 Reddit 归档/ }).waitFor();
+  await capture("01-four-intake-methods");
+  const statusResult = page.waitForResponse(res => res.url().endsWith(`/projects/${active}/archives/status`));
+  await page.getByRole("button", { name: /离线 Reddit 归档/ }).click();
+  const connection = await (await statusResult).json();
+  assert.equal(connection.state, "available", `Archive status: ${JSON.stringify(connection)}`);
+  await page.getByText("DuckDB 已连接", { exact: true }).waitFor();
+  if (liveRoot) {
+    await page.getByLabel(/全部月份/).uncheck();
+    await page.getByLabel(/2026-10/).check();
+  }
+  await page.getByLabel("关键词或布尔检索").fill("duckdb");
+  await page.getByRole("button", { name: "检查与预览" }).click();
+  await page.getByRole("button", { name: "确认关联当前项目" }).waitFor();
+  await capture("02-live-preview");
+  await page.getByRole("button", { name: "确认关联当前项目" }).click();
+  await page.getByRole("button", { name: "进入探索", exact: true }).first().click();
+  assert.match(page.url(), /\/explore\?.*archiveRefId=/);
+  await page.reload();
+  await page.getByRole("heading", { name: "探索", exact: true }).waitFor();
+  await page.getByRole("button", { name: "探索", exact: true }).waitFor();
+  await page.getByRole("button", { name: "检索归档" }).click();
+  const details = page.getByRole("button", { name: "查看原文与讨论串" });
+  await details.first().waitFor();
+  await capture("03-explore-results");
+  if (liveRoot) {
+    await page.getByRole("button", { name: "下一页" }).click();
+    await details.first().waitFor();
+    await page.getByRole("button", { name: "上一页" }).click();
+    await details.first().waitFor();
+  }
+  await details.first().click();
+  await page.getByRole("heading", { name: /^已归档评论/ }).waitFor();
+  await page.getByRole("region", { name: "归档证据" }).getByRole("heading").first().scrollIntoViewIfNeeded();
+  await capture("04-evidence");
+  await page.getByLabel("当前项目").selectOption(empty);
+  await page.getByText("请先在数据接入关联归档，再开始探索。").waitFor();
+  assert.equal(await details.count(), 0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByLabel("当前项目").selectOption(active);
+  await page.getByRole("button", { name: "检索归档" }).waitFor();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  assert.ok(overflow <= 2, `Explore overflowed mobile viewport by ${overflow}px`);
+  await capture("05-mobile-explore");
+
+  const refs = await (await request("get", `/projects/${active}/archives`)).json();
+  assert.equal(refs.references.length, 1);
+  const ref = refs.references[0].id;
+  assert.equal((await request("delete", `/projects/${active}/archives/${ref}`)).status(), 200);
+  assert.deepEqual(await (await request("get", `/projects/${active}/archives`)).json(), { references: [] });
+  const after = await snapshot();
+  assert.deepEqual(after, before);
+  if (liveRoot) {
+    console.log("R4 direct read PG counts (before and after):", JSON.stringify(after));
+    const refreshStatus = () => page.getByRole("button", { name: "检测连接" }).click();
+    await stopArchive();
+    await refreshStatus();
+    await page.getByText("归档服务离线，检查服务后重试。").waitFor();
+    assert.ok((await request("get", "/projects")).ok());
+    await startArchive(path.join(liveRoot, "__missing_r4_browser_fixture__"));
+    await refreshStatus();
+    await page.getByText("归档服务无法读取配置的目录。").waitFor();
+    await stopArchive();
+    await startArchive(liveRoot);
+    await refreshStatus();
+    await page.getByText("DuckDB 已连接", { exact: true }).waitFor();
+
+    const scratch = await mkdtemp(path.join(tmpdir(), "r4-compat-"));
+    t.after(() => rm(scratch, { recursive: true, force: true }));
+    const ledger = path.join(scratch, "receipt.sqlite");
+    const key = await request("post", "/access/keys", {
+      label: "R4 isolated compatibility test", scopes: ["ingest"], allowedSourceIds: [sourceId], expiresInDays: 1,
+    });
+    assert.equal(key.status(), 200, await key.text());
+    const machineToken = (await key.json()).token as string;
+    const runCli = async (args: string[]) => {
+      const { stdout } = await promisify(execFile)(python, [
+        "-m", "zst_archive.cli", "push", "--archive-root", liveRoot, "--months", "2026-10",
+        "--query", "duckdb", "--subreddits", "dataengineering", "--limit", "1", "--max-comments-per-post", "0",
+        "--source-id", sourceId, "--ledger-path", ledger, "--api-url", address,
+        "--fetched-at", "2026-11-25T00:00:00Z", ...args,
+      ], { env: { ...process.env, PYTHONPATH: pluginPath, PYTHONUTF8: "1", ARCHIVE_INGEST_TOKEN: machineToken } });
+      return JSON.parse(stdout);
+    };
+    await runCli(["--dry-run"]);
+    assert.equal(existsSync(ledger), false);
+    assert.deepEqual(await snapshot(), before);
+    const receipt = await runCli([]);
+    assert.equal(receipt.totals.added, 1);
+    assert.equal(receipt.totals.batchesSent, 1);
+    assert.equal(receipt.batches[0].status, 201);
+    const batchId = receipt.batches[0].batchId as string;
+    assert.ok(batchId);
+    const replay = await runCli(["--force"]);
+    assert.equal(replay.batches[0].status, 200);
+    assert.equal(replay.batches[0].batchId, batchId);
+    const resumed = await runCli([]);
+    assert.equal(resumed.totals.skippedResume, 1);
+    assert.equal(resumed.batches[0].batchId, batchId);
+    const attach = await request("post", `/projects/${active}/batches`, { batchId });
+    assert.equal(attach.status(), 200, await attach.text());
+    assert.equal((await db.pool.query(
+      "SELECT count(*)::int AS count FROM monitor_project_batch WHERE project_id=$1 AND batch_id=$2",
+      [active, batchId],
+    )).rows[0].count, 1);
+    console.log("R4 legacy push: dry run clean, 1 post ingested, 201/200 stable batch receipt, 1 ledger skip, 1 project membership.");
+  }
   assert.deepEqual(errors, []);
 });

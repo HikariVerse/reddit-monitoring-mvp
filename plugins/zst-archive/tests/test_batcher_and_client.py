@@ -78,6 +78,7 @@ def test_cli_push_retries_429_and_resumes_from_ledger(tmp_path: Path, monkeypatc
         })
         resp_body = json.dumps({
             "jobId": f"00000000-0000-4000-8000-00000000000{len(received_calls)}",
+            "batchId": f"10000000-0000-4000-8000-00000000000{len(received_calls)}",
             "added": len(payload["items"]),
             "updated": 0,
             "accepted": len(payload["items"]),
@@ -122,6 +123,7 @@ def test_cli_push_retries_429_and_resumes_from_ledger(tmp_path: Path, monkeypatc
     out2 = json.loads(capsys.readouterr().out)
     assert out2["totals"]["skippedResume"] == 2
     assert out2["totals"]["batchesSent"] == 0
+    assert [batch["batchId"] for batch in out2["batches"]] == [batch["batchId"] for batch in out1["batches"]]
     assert len(received_calls) == 2
 
     ledger = IngestLedger(ledger_path)

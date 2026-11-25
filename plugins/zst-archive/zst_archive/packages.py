@@ -19,14 +19,27 @@ class MonthPackage:
     manifest: dict[str, Any]
 
 
-def _load_single_package(package_dir: Path) -> MonthPackage | None:
+def _load_single_package(package_dir: Path, boundary: Path | None = None) -> MonthPackage | None:
     manifest_path = package_dir / "manifest.json"
     posts_p = package_dir / "corpus" / "posts.parquet"
     comments_p = package_dir / "corpus" / "comments.parquet"
     ledger_p = package_dir / "base" / "population_ledger.parquet"
+    if boundary is not None:
+        for path in (package_dir, manifest_path, posts_p, comments_p, ledger_p, package_dir / "index"):
+            if not path.resolve().is_relative_to(boundary):
+                raise ValueError("Archive package path escapes the archive root")
+        if manifest_path.exists() and not (posts_p.is_file() and comments_p.is_file()):
+            raise ValueError("Archive package is missing a Parquet file")
     if not (manifest_path.exists() and posts_p.exists() and comments_p.exists()):
         return None
     shards = tuple(sorted((package_dir / "index").glob("fts_*.sqlite")))
+    if boundary is not None:
+        if not shards:
+            raise ValueError("Archive package is missing its FTS shards")
+        if any(not shard.resolve().is_relative_to(boundary) or not shard.is_file() for shard in shards):
+            raise ValueError("Invalid archive index path")
+        if manifest_path.stat().st_size > 1_000_000:
+            raise ValueError("Archive manifest is too large")
     if not shards:
         return None
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -47,6 +60,7 @@ def discover_packages(
     *,
     package_dir: Path | None = None,
     months: list[str] | None = None,
+    contain_paths: bool = False,
 ) -> list[MonthPackage]:
     """Find valid open-corpus-v1 packages filtered by optional month list."""
     selected = {m.strip() for m in (months or []) if m.strip()}
@@ -69,7 +83,7 @@ def discover_packages(
     for child in sorted(root.iterdir()):
         if not child.is_dir():
             continue
-        pkg = _load_single_package(child)
+        pkg = _load_single_package(child, root if contain_paths else None)
         if pkg is None:
             continue
         if selected and pkg.month not in selected:

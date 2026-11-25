@@ -13,6 +13,7 @@ class IngestLedger:
         self.db_path = db_path.resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(self.db_path))
+        self.conn.execute("BEGIN IMMEDIATE")
         self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS ingest_batch_ledger (
@@ -23,6 +24,7 @@ class IngestLedger:
                 item_count INTEGER NOT NULL,
                 status TEXT NOT NULL,
                 job_id TEXT,
+                batch_id TEXT,
                 added INTEGER,
                 updated INTEGER,
                 accepted INTEGER,
@@ -31,6 +33,9 @@ class IngestLedger:
             )
             """
         )
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(ingest_batch_ledger)")}
+        if "batch_id" not in columns:
+            self.conn.execute("ALTER TABLE ingest_batch_ledger ADD COLUMN batch_id TEXT")
         self.conn.commit()
 
     def close(self) -> None:
@@ -39,7 +44,7 @@ class IngestLedger:
     def get_succeeded(self, source_id: str, content_fingerprint: str) -> dict[str, Any] | None:
         row = self.conn.execute(
             """
-            SELECT idempotency_key, job_id, added, updated, accepted, updated_at
+            SELECT idempotency_key, job_id, added, updated, accepted, updated_at, batch_id
             FROM ingest_batch_ledger
             WHERE source_id = ? AND content_fingerprint = ? AND status = 'succeeded'
             """,
@@ -50,6 +55,7 @@ class IngestLedger:
         return {
             "idempotencyKey": row[0],
             "jobId": row[1],
+            "batchId": row[6],
             "added": row[2],
             "updated": row[3],
             "accepted": row[4],
@@ -66,6 +72,7 @@ class IngestLedger:
         item_count: int,
         status: str,
         job_id: str | None = None,
+        batch_id: str | None = None,
         added: int | None = None,
         updated: int | None = None,
         accepted: int | None = None,
@@ -75,14 +82,15 @@ class IngestLedger:
             """
             INSERT INTO ingest_batch_ledger (
                 source_id, content_fingerprint, idempotency_key, request_sha256,
-                item_count, status, job_id, added, updated, accepted, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                item_count, status, job_id, batch_id, added, updated, accepted, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (source_id, content_fingerprint) DO UPDATE SET
                 idempotency_key = excluded.idempotency_key,
                 request_sha256 = excluded.request_sha256,
                 item_count = excluded.item_count,
                 status = excluded.status,
                 job_id = COALESCE(excluded.job_id, ingest_batch_ledger.job_id),
+                batch_id = COALESCE(excluded.batch_id, ingest_batch_ledger.batch_id),
                 added = COALESCE(excluded.added, ingest_batch_ledger.added),
                 updated = COALESCE(excluded.updated, ingest_batch_ledger.updated),
                 accepted = COALESCE(excluded.accepted, ingest_batch_ledger.accepted),
@@ -96,6 +104,7 @@ class IngestLedger:
                 item_count,
                 status,
                 job_id,
+                batch_id,
                 added,
                 updated,
                 accepted,

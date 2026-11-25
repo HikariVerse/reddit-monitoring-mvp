@@ -28,7 +28,7 @@
 - **真实性红线**：`MUST NOT` 混淆“生产运行版本”、“`origin/main` 已合入代码”与“未合入 PR 分支代码”；`MUST NOT` 伪造趋势、火花线、百分比或把未实装接口写成 `[LIVE]`；用户明确指令高于历史文档。
 - **单主干与安全操作**：唯一常驻主干为 **`main`**，从最新 `origin/main` 切分支开发，通过 `CI Gate` 与评审后 `Squash and Merge`；发版使用 `vX.Y.Z` 不可变 Tag；禁输出密钥、禁无授权 `git push --force`。
 - **前向迁移不可变**：主干已合入的 SQL 迁移严禁改写、移动或删除；新迁移按当前主干最大编号顺延，由 `lint:policy`、`Squawk`、PG16 回滚测试与 `.github/CODEOWNERS` 把关；`050` 退役旧表永不复活。
-- **主线与外挂隔离**：主线只运行 `Fastify 5 + TypeBox + PostgreSQL 16 + React`（零 ORM、Redis、Python、DuckDB、无头浏览器）；R4 `plugins/zst-archive/` 与重型/反爬 L3 采集器 `MUST` 外置运行，只持锁死 `allowedSourceIds` 与 `ingest` scope 的 Machine Key 调 `POST /v1/sources/:id/ingest`。
+- **主线与外挂隔离**：主线只运行 `Fastify 5 + TypeBox + PostgreSQL 16 + React`（零 ORM、Redis、Python、DuckDB、无头浏览器）；R4 `plugins/zst-archive/` 与重型/反爬 L3 采集器 `MUST` 外置运行，推流只持锁死 `allowedSourceIds` 与 `ingest` scope 的 Machine Key 调 `POST /v1/sources/:id/ingest`。R4 归档直查由主线鉴权后访问外置 DuckDB 的私网只读接口，使用独立服务凭证。
 - **安全与数据底线**：严格遵守[核心不变量台账](docs/invariants.md)（`INV-001`..`INV-010`）；全库内容写唯一入口为 `commitContentBatch`；`/v1/content/*` 仅 `GET/HEAD` 映射 `read` scope；付费渠道 `unknown` 永不自动重放。
 
 ## 4. 代码质量准则

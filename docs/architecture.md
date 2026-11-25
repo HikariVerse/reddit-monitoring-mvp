@@ -52,12 +52,14 @@ flowchart TD
   INTEL --> ACCESS
   PROJECTS --> CONTENT
   PROJECTS --> COLLECTION
+  ARCHIVE_ANALYSIS --> PROJECTS
+  ARCHIVE_ANALYSIS --> COLLECTION
   WORKSPACE --> CONTENT
   AI --> ACCESS
   AI --> CONTENT
 ```
 
-| 模块域 | 当前跨模块依赖（仅经 `index.ts` 门面，禁成环） | 独家写表所有权（`001..069` 受监管写表 **62 张**） |
+| 模块域 | 当前跨模块依赖（仅经 `index.ts` 门面，禁成环） | 独家写表所有权（`001..070` 受监管写表 **63 张**） |
 | :--- | :--- | :--- |
 | **`access`** | 严格叶子域（`modules-access-leaf` 强制） | **8 表**：`app_user`、`app_user_password`、`app_invite`、`app_audit_log`、`app_session`、`app_auth_challenge`、`app_auth_mfa`、`app_auth_mfa_login`。 |
 | **`docs`** | 当前无跨域依赖 | **1 表**：`doc_page`（产品文档中心，支持 `markdown` / `https` 外链 / 8 MiB 内联 PDF）。 |
@@ -66,6 +68,7 @@ flowchart TD
 | **`feed`** | `content` | **4 表**（`062`）：`feed_user_seen`、`feed_user_event`、`feed_user_affinity`、`feed_user_preference`。与 `intelligence`/`projects`/`workspace`/`ai` 物理隔离。 |
 | **`intelligence`** | `content`、`collection`、`access` | **8 表**（`063`/`066`/`069`）：`intel_monitor`、`intel_monitor_source`、`intel_monitor_target`、`intel_rollup_bucket`、`intel_monitor_usage`、`intel_research_task`、`intel_research_task_item`、`intel_research_cache`。通过 `collection` 门面创/停源与预估额度。 |
 | **`projects`** | `content`、`collection` | **3 表**：`monitor_project`、`monitor_project_source`、`monitor_project_batch`（现有专题兼容层，概览/水合分别委托 `content` 与 `collection`）。 |
+| **`archive-analysis`** | `projects`、`collection` | **1 表**（`070`）：`monitor_project_archive`，保存版本、范围和项目授权引用。归档原文由外置插件读取。 |
 | **`workspace`** | `content` | **2 表**：`content_saved_query`、`content_annotation`（严格浏览器会话隔离）。 |
 | **`ai`** | `access`、`content` | **17 表**（`054..056` + `067`）：全量 `ai_*` 发布、榜单、同步运行、历史导入/回填表及加密凭证表 `ai_provider_credential`。 |
 | **`src/storage/`** | 无业务依赖 | **1 表**：`schema_migration` 迁移引导与 SHA-256 不可变校验台账。 |
@@ -104,7 +107,9 @@ flowchart TD
 | :--- | :--- | :--- |
 | **L1 · 主线内置直采（\$0）** | `feed`（RSS/Atom + `web_list` + `json_list`）、`newsnow`（`packages/contracts/src/web-boards.ts` 内置 6 榜单）、`bluesky_appview` | 动态 HTTPS 抓取（`FEED_ALLOWED_URLS` 留空时受全局公网 IP DNS 校验放行）、OPML/JSON 批量导入、`ETag`/`304` 1.5× 指数退避（上限 12h）与 `1500ms` 同域冷却。 |
 | **L2 · 预算门控付费 API** | Reddit（`kaix` 主力 + `red_crawler` 备源）、X（`twitterapis` 主力 + `scrapebadger` 备源与批量补全） | V2 升级富媒体、社区/外链域名、作者粉丝画像与 `top`/`min_faves` 原生排序；X 多账号监测自动拼装 15–20 人 `from:u1 OR from:u2` 批次查询；单页钳制 `twitterapis <= 20`；触发 `unknown` 状态立即熔断停采。 |
-| **R4 / L3 · 外部物理隔离外挂** | `plugins/zst-archive/`（Python/DuckDB 离线归档转换器）与未来 L3 无头/反爬采集器 | 严禁进入主线 Dockerfile；必须独立部署并仅持锁死 `allowedSourceIds` + `ingest` scope 的 Machine Key 调 `POST /v1/sources/:id/ingest`（单批 `1..100` 条、`<= 1 MiB`、`Idempotency-Key` 幂等）。 |
+| **R4 / L3 · 外部物理隔离外挂** | `plugins/zst-archive/`（Python/DuckDB 离线归档查询与推流）与未来 L3 无头/反爬采集器 | 严禁进入主线 Dockerfile；必须独立部署；推流只持锁死 `allowedSourceIds` + `ingest` scope 的 Machine Key 调 `POST /v1/sources/:id/ingest`（单批 `1..100` 条、`<= 1 MiB`、`Idempotency-Key` 幂等）。R4 直查另由 Fastify 在通过项目及来源授权后调用插件私网只读 HTTP 接口。 |
+
+详细配置见 [R4 归档运行手册](r4-archive.md)。SQLite FTS5 与 Parquet 在插件节点只读，DuckDB 独立进程可终止，目录和服务地址由运维配置。主线只保存授权引用，不复制正文或触发在线采集。
 
 > 已退役的 `twitterapi_io` 与 `arctic_shift` 连接器代码已在主线物理删除，并由 `scripts/check-docs.ts` 与 `eslint.config.mjs` 防止回流；历史观测中的 `provider` 标识保留只读溯源。
 

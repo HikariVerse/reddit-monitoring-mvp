@@ -51,6 +51,7 @@ CI 只做**高信噪比、指向真实缺陷的硬阻断**；PR 描述格式、�
 | 纯后端代码（`src/**`、`apps/api/**`、`tests/{unit,integration}/**`） | `lint:arch`（`depcruise` + 单写表与凭证表读隔离）+ `lint:api`（ESLint）+ `tsc` + `check:openapi` + `test:unit` + `test:postgres` + `smoke:compiled`（**不再拖慢触发前端 Chromium E2E**） |
 | 新增 SQL 迁移 | 自动运行 **`Squawk`** 锁表与索引并发风险扫描 + PG16 集成验证 |
 | 前端 / 浏览器 / 契约 / 合入主干 | 前端改动及带 `run-e2e` 标签或 `push` 到 `main` 时触发 `lint:web` + `build:web` + `check:web-bundle`（仅查密钥泄漏）+ Chromium `test:browser`；改 `packages/contracts/` 双端联动校验；改 `Dockerfile`/`compose`/`deploy/` 触发容器构建校验 |
+| 外置 R4 插件 | 改动 `plugins/zst-archive/` 时单独构建插件镜像，用真实 Parquet/SQLite FTS 夹具运行查询、权限失败及超时恢复。 |
 | PR 治理防弱化 | `scripts/check-governance-diff.mjs`（新增 `.only(` 直接阻断，改动高危治理面或新增 `.skip`/`eslint-disable`/`@ts-expect-error` 高亮审计） |
 
 **测试分层原则**：纯算法/解析/规范化进 `tests/unit/*.test.ts`；路由契约与鉴权用 Fastify `inject()`；SQL/事务/并发/幂等使用隔离 `postgres:16-alpine` 运行 `tests/integration/*-postgres.test.ts`；多端交互与可用性进 `tests/browser/*.test.ts`。

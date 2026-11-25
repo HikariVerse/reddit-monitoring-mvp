@@ -25,6 +25,7 @@ const WorkbenchShell = lazy(() =>
 const ContentExplorerPage = lazy(() =>
   import('./pages/ContentExplorerPage').then((m) => ({ default: m.ContentExplorerPage })),
 );
+const ExplorePage = lazy(() => import('./pages/ExplorePage').then((m) => ({ default: m.ExplorePage })));
 const ProjectsPage = lazy(() =>
   import('./pages/ProjectsPage').then((m) => ({ default: m.ProjectsPage })),
 );
@@ -50,6 +51,7 @@ const PUBLIC_ROUTES: PublicRoute[] = ['/', '/product', '/ai', '/docs'];
 
 const WORKBENCH_ROUTES: WorkbenchRoute[] = [
   '/app/feed',
+  '/explore',
   '/projects',
   '/content',
   '/sources',
@@ -60,6 +62,7 @@ const WORKBENCH_ROUTES: WorkbenchRoute[] = [
 ];
 
 const AUTH_REQUIRED_ROUTES: WorkbenchRoute[] = [
+  '/explore',
   '/projects',
   '/sources',
   '/workspace',
@@ -570,6 +573,8 @@ function isPublicSitePath(pathname: string): boolean {
                   </div>
                 </div>
               )}
+
+              {workbenchRoute === '/explore' && actor && <ExplorePage search={loc.search} onNavigate={navigate} />}
 
               {workbenchRoute === '/projects' && actor && (
                 <ProjectsPage

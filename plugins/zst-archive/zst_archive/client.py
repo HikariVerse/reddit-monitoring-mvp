@@ -24,6 +24,7 @@ class IngestResponse:
     added: int
     updated: int
     accepted: int
+    batch_id: str | None = None
 
 
 def _parse_retry_after(header_value: str | None, fallback_s: float) -> float:
@@ -65,6 +66,7 @@ def post_ingest_batch(
                     added=int(data["added"]),
                     updated=int(data["updated"]),
                     accepted=int(data["accepted"]),
+                    batch_id=data.get("batchId"),
                 )
         except urllib.error.HTTPError as exc:
             err_body = exc.read().decode("utf-8", errors="replace")

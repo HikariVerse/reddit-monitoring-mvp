@@ -12,6 +12,7 @@ test("PR checks follow risk and isolate backend PRs from slow browser E2E", () =
   assert.deepEqual(enabled(["src/modules/access/session.ts", "apps/api/src/app.ts"]), ["api", "postgres", "project"]);
   assert.deepEqual(enabled(["apps/web/src/new-feature.tsx"]), ["browser", "project", "web"]);
   assert.deepEqual(enabled(["tests/browser/workbench.test.ts"]), ["api", "browser", "project"]);
+  assert.deepEqual(enabled(["plugins/zst-archive/zst_archive/service.py"]), ["archive"]);
   for (const file of [".dockerignore", "scripts/verify-container-build.sh"]) {
     assert.deepEqual(enabled([file]), ["docker"]);
   }
@@ -26,7 +27,7 @@ test("main push runs integrated browser checks, while manual/release runs full s
   assert.deepEqual(enabled(["docs/development.md"], { event: "push" }), []);
   assert.deepEqual(enabled(["src/modules/feed/sql.ts"], { event: "push" }), ["api", "browser", "postgres", "project", "web"]);
   assert.deepEqual(enabled(["apps/web/src/new-feature.tsx"], { event: "push" }), ["api", "browser", "postgres", "project", "web"]);
-  const full = ["api", "browser", "postgres", "project", "web", "workflow"];
+  const full = ["api", "archive", "browser", "postgres", "project", "web", "workflow"];
   assert.deepEqual(enabled([], { event: "workflow_dispatch", full: true }), [...full.slice(0, 2), "docker", ...full.slice(2)].sort());
   assert.deepEqual(enabled([], { event: "push", full: true, release: true }), full);
 });

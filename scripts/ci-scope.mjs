@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 export function verificationScope(files, { event, full = false, forceBrowser = false, release: _release = false }) {
   const scope = {
     api: false, web: false, postgres: false, browser: forceBrowser,
-    docker: event === "workflow_dispatch", workflow: false,
+    docker: event === "workflow_dispatch", workflow: false, archive: full,
   };
   const areas = new Set();
 
@@ -16,6 +16,8 @@ export function verificationScope(files, { event, full = false, forceBrowser = f
       areas.add("shared");
     } else if (/^(Dockerfile|\.dockerignore|docker-compose\.yml|scripts\/verify-container-build\.sh)$|^deploy\//.test(file)) {
       scope.docker = true;
+    } else if (file.startsWith("plugins/zst-archive/")) {
+      scope.archive = true;
     } else if (file.startsWith("tests/browser/")) {
       scope.browser = true;
       scope.api = true; // Root typecheck includes browser test sources.

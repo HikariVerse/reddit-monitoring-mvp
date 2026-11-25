@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import sqlite3
 import time
@@ -59,7 +60,7 @@ class SelectionResult:
     stats: dict[str, Any]
 
 
-def _parse_iso_to_epoch(value: str | None) -> int | None:
+def _parse_iso_to_epoch(value: str | None, *, ceil: bool = False) -> int | None:
     if value is None or not value.strip():
         return None
     raw = value.strip()
@@ -68,7 +69,7 @@ def _parse_iso_to_epoch(value: str | None) -> int | None:
     dt = datetime.fromisoformat(raw)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return int(dt.timestamp())
+    return math.ceil(dt.timestamp()) if ceil else int(dt.timestamp())
 
 
 def parse_boolean_query(text: str) -> Any:
@@ -162,6 +163,14 @@ def _fts_expr(tree: Any, *, relaxed: bool) -> str:
     return expr
 
 
+def _has_negation(tree: Any) -> bool:
+    if tree[0] == "TERM":
+        return False
+    if tree[0] == "NOT":
+        return True
+    return _has_negation(tree[1]) or _has_negation(tree[2])
+
+
 def _has_phrase(tree: Any) -> bool:
     if tree is None:
         return False
@@ -207,15 +216,17 @@ def _verification_sql(tree: Any, scopes: tuple[str, ...], comments_union: str) -
     return compile_node(tree), params
 
 
-def _query_shard(args: tuple[str, str, str]) -> list[tuple[str, int]]:
-    month, uri, expr = args
+def _query_shard(args: tuple[str, str, str, int | None]) -> list[tuple[str, int]]:
+    month, uri, expr, doc_id = args
     conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
     try:
         deadline = time.monotonic() + 20.0
         conn.set_progress_handler(lambda: int(time.monotonic() > deadline), 10_000)
+        clause = " AND rowid = ?" if doc_id is not None else ""
+        params = (expr, doc_id) if doc_id is not None else (expr,)
         rows = conn.execute(
-            f"SELECT rowid FROM docs WHERE docs MATCH ? LIMIT {MAX_SHARD_RECALL + 1}",
-            (expr,),
+            f"SELECT rowid FROM docs WHERE docs MATCH ?{clause} LIMIT {MAX_SHARD_RECALL + 1}",
+            params,
         ).fetchall()
         if len(rows) > MAX_SHARD_RECALL:
             raise ValueError("FTS shard recall exceeded 125,000 candidates; narrow your query")
@@ -224,9 +235,9 @@ def _query_shard(args: tuple[str, str, str]) -> list[tuple[str, int]]:
         conn.close()
 
 
-def _recall_candidates(packages: list[MonthPackage], fts_expr: str) -> list[tuple[str, int]]:
+def _recall_candidates(packages: list[MonthPackage], fts_expr: str, doc_id: int | None = None, *, immutable: bool = False) -> list[tuple[str, int]]:
     tasks = [
-        (pkg.month, shard.as_uri() + "?mode=ro", fts_expr)
+        (pkg.month, shard.as_uri() + ("?mode=ro&immutable=1" if immutable else "?mode=ro"), fts_expr, doc_id)
         for pkg in packages
         for shard in pkg.fts_shards
     ]
@@ -249,7 +260,16 @@ def _union_sql(packages: list[MonthPackage], attr: str, cols: str) -> tuple[str,
     return " UNION ALL ".join(parts), params
 
 
-def select_archive_threads(packages: list[MonthPackage], spec: QuerySpec) -> SelectionResult:
+def select_archive_threads(
+    packages: list[MonthPackage],
+    spec: QuerySpec,
+    *,
+    additional_query: str = "",
+    after: tuple[int, str, int] | None = None,
+    evidence: tuple[str, int, str | None] | None = None,
+    direct: bool = False,
+    config: dict[str, str] | None = None,
+) -> SelectionResult:
     """Query open-corpus-v1 packages and return matched posts + bounded comment threads."""
     if not packages:
         raise ValueError("No open-corpus-v1 packages found")
@@ -262,14 +282,14 @@ def select_archive_threads(packages: list[MonthPackage], spec: QuerySpec) -> Sel
     if not spec.query.strip() and not normalized_subs and not spec.allow_unscoped:
         raise ValueError("Provide at least --query or --subreddits (or pass --allow-unscoped)")
 
-    from_epoch = _parse_iso_to_epoch(spec.from_iso)
-    to_epoch = _parse_iso_to_epoch(spec.to_iso)
-    if from_epoch is not None and to_epoch is not None and from_epoch >= to_epoch:
+    from_epoch = _parse_iso_to_epoch(spec.from_iso, ceil=direct)
+    to_epoch = _parse_iso_to_epoch(spec.to_iso, ceil=direct)
+    if from_epoch is not None and to_epoch is not None and from_epoch >= to_epoch and not direct:
         raise ValueError("--from must be strictly earlier than --to")
 
-    tree = parse_boolean_query(spec.query)
+    trees = [tree for query in (spec.query, additional_query) if (tree := parse_boolean_query(query)) is not None]
     candidates: list[tuple[str, int]] | None = None
-    verify_sql = "TRUE"
+    verification: list[str] = []
     verify_params: list[str] = []
 
     posts_cols = (
@@ -280,20 +300,29 @@ def select_archive_threads(packages: list[MonthPackage], spec: QuerySpec) -> Sel
     posts_union, posts_union_params = _union_sql(packages, "posts_parquet", posts_cols)
     comments_union, comments_union_params = _union_sql(packages, "comments_parquet", comments_cols)
 
-    if tree is not None:
+    for tree in trees:
         narrow = set(spec.scopes) != set(ALL_SCOPES)
-        need_verify = _has_phrase(tree) or narrow
+        # FTS evaluates plain terms directly. Verify phrases and complex negation over Parquet.
+        need_verify = _has_phrase(tree) or narrow or (direct and _has_negation(tree))
         expr = _fts_expr(tree, relaxed=need_verify)
-        candidates = _recall_candidates(packages, expr)
+        recalled = _recall_candidates(packages, expr, evidence[1] if evidence else None, immutable=direct)
+        if candidates is None:
+            candidates = list(dict.fromkeys(recalled))
+        else:
+            candidates = list(set(candidates).intersection(recalled))
         if not candidates:
             return SelectionResult(posts=[], comments=[], stats={"ftsCandidates": 0, "matchedPosts": 0, "matchedComments": 0})
         if need_verify:
-            verify_sql, extra = _verification_sql(tree, spec.scopes, comments_union)
-            verify_params = _interleave_verify_params(verify_sql, comments_union, comments_union_params, extra)
+            clause, extra = _verification_sql(tree, spec.scopes, comments_union)
+            verification.append(clause)
+            verify_params.extend(_interleave_verify_params(clause, comments_union, comments_union_params, extra))
 
-    con = duckdb.connect()
+    con = duckdb.connect(config={
+        "threads": "2", "memory_limit": "1536MB",
+        "autoload_known_extensions": "false", "autoinstall_known_extensions": "false",
+        **(config or {}),
+    })
     try:
-        con.execute("SET threads=2; SET memory_limit='1536MB'; SET TimeZone='UTC';")
         where_clauses: list[str] = []
         params: list[Any] = []
 
@@ -325,18 +354,29 @@ def select_archive_threads(packages: list[MonthPackage], spec: QuerySpec) -> Sel
         if spec.min_comments is not None:
             where_clauses.append("p.reported_comments >= ?")
             params.append(spec.min_comments)
-        if verify_sql != "TRUE":
-            where_clauses.append(verify_sql)
-            params.extend(verify_params)
+        where_clauses.extend(verification)
+        params.extend(verify_params)
+        if after is not None:
+            created, month, doc_id = after
+            where_clauses.append("(p.created_utc < ? OR (p.created_utc = ? AND (p.month, p.doc_id) > (?, ?)))")
+            params.extend((created, created, month, doc_id))
+        if evidence is not None:
+            where_clauses.append("p.month = ? AND p.doc_id = ?")
+            params.extend(evidence[:2])
 
         where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        order = "p.created_utc DESC, p.month ASC, p.doc_id ASC" if direct else "p.created_utc DESC, p.content_key ASC"
+        title = "left(p.title, 1024)" if direct else "p.title"
+        body_limit = 24000 if evidence else 360
+        body = f"left(p.body, {body_limit})" if direct else "p.body"
+        truncated = f"COALESCE(p.is_truncated, false) OR COALESCE(length(p.body), 0) > {body_limit} OR COALESCE(length(p.title), 0) > 1024" if direct else "p.is_truncated"
         post_sql = f"""
             SELECT p.month, p.doc_id, p.content_key, p.created_utc, p.community,
                    p.author_key, p.score, p.reported_comments, p.content_type,
-                   p.domain, p.flair, p.title, p.body, p.is_truncated
+                   p.domain, p.flair, {title} AS title, {body} AS body, COALESCE({truncated}, false) AS is_truncated
             {from_sql}
             {where_sql}
-            ORDER BY p.created_utc DESC, p.content_key ASC
+            ORDER BY {order}
             LIMIT ?
         """
         params.append(spec.limit)
@@ -346,7 +386,37 @@ def select_archive_threads(packages: list[MonthPackage], spec: QuerySpec) -> Sel
         posts = [dict(zip(col_names, row)) for row in cur.fetchall()]
 
         comments: list[dict[str, Any]] = []
-        if spec.include_comments and spec.max_comments_per_post > 0 and posts:
+        archived_comments = 0
+        selected_comment = None
+        if evidence is not None and posts:
+            month, doc_id, comment_id = evidence
+            cursor = con.execute(f"""
+                SELECT month, comment_id, post_doc_id, parent_key, created_utc, author_key, score,
+                       left(body, 12000) AS body, length(body) > 12000 AS is_truncated,
+                       count(*) OVER () AS total
+                FROM ({comments_union}) c
+                WHERE month = ? AND post_doc_id = ?
+                ORDER BY is_op DESC, score DESC, created_utc ASC, comment_id ASC
+                LIMIT ?
+            """, [*comments_union_params, month, doc_id, spec.max_comments_per_post])
+            columns = [d[0] for d in cursor.description]
+            comments = [dict(zip(columns, row)) for row in cursor.fetchall()]
+            if comments:
+                archived_comments = comments[0]["total"]
+                for comment in comments:
+                    del comment["total"]
+            if comment_id is not None:
+                cursor = con.execute(f"""
+                    SELECT month, comment_id, post_doc_id, parent_key, created_utc, author_key, score,
+                           left(body, 12000) AS body, length(body) > 12000 AS is_truncated
+                    FROM ({comments_union}) c
+                    WHERE month = ? AND post_doc_id = ? AND comment_id = ?
+                    LIMIT 1
+                """, [*comments_union_params, month, doc_id, comment_id])
+                row = cursor.fetchone()
+                if row is not None:
+                    selected_comment = dict(zip([d[0] for d in cursor.description], row))
+        elif spec.include_comments and spec.max_comments_per_post > 0 and posts:
             post_keys_tbl = pa.table({
                 "month": pa.array([p["month"] for p in posts], type=pa.string()),
                 "post_doc_id": pa.array([p["doc_id"] for p in posts], type=pa.uint32()),
@@ -385,6 +455,7 @@ def select_archive_threads(packages: list[MonthPackage], spec: QuerySpec) -> Sel
                 "matchedPosts": len(posts),
                 "matchedComments": len(comments),
                 "months": [p.month for p in packages],
+                **({"archivedComments": archived_comments, "comment": selected_comment} if evidence else {}),
             },
         )
     finally:

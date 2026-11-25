@@ -185,9 +185,25 @@ jobs:
           persist-credentials: false
       - run: bash scripts/verify-container-build.sh
 
+  archive:
+    name: R4 plugin and DuckDB fixtures
+    needs: policy
+    if: fromJSON(needs.policy.outputs.scope).archive
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build the standalone plugin and run real Parquet/FTS fixtures
+        run: |
+          docker build -t r4-verify plugins/zst-archive
+          docker run --rm --user 0:0 --entrypoint sh -v "$PWD/plugins/zst-archive/tests:/tests:ro" r4-verify \
+            -ec 'pip install --no-cache-dir "pytest>=8,<10" && pytest -q -p no:cacheprovider /tests'
+
   ci-gate:
     name: CI Gate
-    needs: [policy, project, workflow, docker]
+    needs: [policy, project, workflow, docker, archive]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5

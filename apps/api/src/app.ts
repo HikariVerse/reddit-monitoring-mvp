@@ -5,6 +5,7 @@ import addFormats from "ajv-formats";
 import Fastify, { type FastifyRequest } from "fastify";
 import rateLimit from "@fastify/rate-limit";
 import swagger from "@fastify/swagger";
+import { registerArchiveAnalysisModule } from "../../../src/modules/archive-analysis/index";
 import type { Pool } from "pg";
 import type { Actor } from "../../../packages/contracts/src/access";
 import type { ContentProvider } from "../../../src/connectors/shared/content-provider.interface";
@@ -311,6 +312,7 @@ export async function buildApp(options: {
   await registerContentModule(app, options.pool, shutdown.signal,
     actor => assertBrowserExportAllowed(options.pool, actor), resolveProjectScope, contentVisibility);
   await registerDocsModule(app, options.pool);
+  await registerArchiveAnalysisModule(app, options.pool);
   const aiVault = options.aiCredentialVault ?? createAiCredentialVault(options.pool, options.sessionSecret);
   await registerAiModule(app, options.pool, readCollectionWorkerHealth, aiVault);
   await registerProjectsModule(app, options.pool, providers);
