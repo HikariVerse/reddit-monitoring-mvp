@@ -1025,7 +1025,7 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
               <div className="hp-ent-body">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <strong style={{ fontSize: 16 }}>Project Overview · Cloud FinOps</strong>
-                  <span className="wb-pill wb-pill--green">stored_sample</span>
+                  <span className="wb-pill wb-pill--green">{t('Verified Stored Data', '真实已存样本')}</span>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
                   <div style={{ background: '#fff', border: '1px solid #e3e7e4', borderRadius: 6, padding: 12 }}>

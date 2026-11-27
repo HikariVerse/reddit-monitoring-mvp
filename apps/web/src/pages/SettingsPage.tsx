@@ -121,7 +121,7 @@ function ActiveAccountColumn({
                 }
               }}
             >
-              {t('Inspect OpenAPI 3.0 Spec →', '核对 /v1/openapi.json →')}
+              {t('Inspect API Reference →', '查看接口文档 →')}
             </button>
           </div>
         )}
@@ -687,7 +687,7 @@ export function SettingsPage({
               <div className="ds-card-hd">
                 <div>
                   <div className="ds-card-title"><Mail size={14} /><span>{t('Generate Invite Code', '生成一次性邀请码')}</span></div>
-                  <div className="ds-card-sub">POST /v1/access/invites · 72 chars · 7 days TTL</div>
+                  <div className="ds-card-sub">{t('Single-use invite link · valid for 7 days', '一次性成员邀请链接 · 7 天内有效')}</div>
                 </div>
               </div>
               <div className="ds-card-bd">

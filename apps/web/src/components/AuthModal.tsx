@@ -530,7 +530,7 @@ export function AuthModal({
                         <div className="db-t">
                           {t('Live Endpoint · Same-Origin /api/v1 Session', '在线实盘 · 同源 /api/v1 Cookie 会话')}
                         </div>
-                        <div className="db-v">POST /api/v1/auth/login · Rate limit 5/min/IP</div>
+                        <div className="db-v">{t('Login protection · up to 5 attempts/min per IP', '安全登录保护 · 每分钟最多尝试 5 次')}</div>
                       </div>
                     </div>
                   </div>

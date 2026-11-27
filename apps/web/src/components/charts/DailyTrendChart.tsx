@@ -488,7 +488,7 @@ export function DailyTrendChart({
             </span>
           )}
         </div>
-        <span>{t('Coverage: stored_sample', '统计口径：已存样本')}</span>
+        <span>{t('Coverage: Stored samples', '统计口径：已存样本')}</span>
       </div>
     </>
   );

@@ -298,11 +298,12 @@ function buildFilterForSourceMode(
   const filter: Filter = {};
   const trimmed = req.query.trim();
   if (trimmed.length >= 2) {
-    // Pass simple terms cleanly to PG search; strip boolean operators for PG fallback
+    const hasOr = /\bOR\b/i.test(trimmed);
     const cleanTerm = trimmed.replace(/\b(?:AND|OR|NOT)\b/gi, " ").replace(/["()]/g, " ").replace(/\s+/g, " ").trim();
     if (cleanTerm.length >= 2) {
       const words = cleanTerm.split(" ").filter((w) => w.length >= 2);
       if (words.length === 1) filter.query = words[0];
+      else if (words.length > 1 && hasOr) filter.anyTerms = words.slice(0, 6);
       else if (words.length > 1) filter.allTerms = words.slice(0, 4);
     }
   }
@@ -354,8 +355,8 @@ async function loadAuthorizedPgDocuments(
       p.code AS platform,
       c.kind,
       c.external_id,
-      c.root_id,
-      c.parent_id,
+      (SELECT ref->>'targetId' FROM jsonb_array_elements(c.content_references) ref WHERE ref->>'kind' = 'root' LIMIT 1) AS root_id,
+      (SELECT ref->>'targetId' FROM jsonb_array_elements(c.content_references) ref WHERE ref->>'kind' = 'parent' LIMIT 1) AS parent_id,
       c.author_handle,
       c.community_name,
       c.title,

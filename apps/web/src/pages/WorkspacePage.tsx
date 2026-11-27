@@ -63,7 +63,7 @@ export function WorkspacePage({
         <div>
           <div className="page-title-row">
             <h1 className="page-title">{t('My Research', '我的研究')}</h1>
-            <span className="tag tag--lilac">/v1/workspace/*</span>
+            <span className="tag tag--lilac">{t('Personal Space', '个人研究空间')}</span>
           </div>
           <p className="page-desc">
             {t(

@@ -676,9 +676,30 @@ export async function discoverResearchResources(
     englishQuery: req.englishQuery,
   });
 
+  const skipArchiveForIndustry =
+    req.template === "industry" && !(req.platforms && req.platforms.includes("reddit"));
+
   const [pgChannel, archiveChannel, storiesChannel] = await Promise.all([
     discoverPgChannel(pool, actor, req, parsed),
-    discoverArchiveChannel(archiveRuntime, actor, req, parsed),
+    skipArchiveForIndustry
+      ? Promise.resolve<ResourceDiscoveryResponse["archiveChannel"]>({
+          status: "unavailable",
+          available: false,
+          version: null,
+          months: [],
+          queryUsed: "",
+          matchedThreads: 0,
+          associatedComments: 0,
+          reportedCommentsSum: 0,
+          needsExactVerify: false,
+          dateRange: { earliest: null, latest: null, activeDays: 0 },
+          byMonth: [],
+          topCommunities: [],
+          samples: [],
+          elapsedMs: 0,
+          message: "行业情报简报优先使用平台实时资讯流；如需叠加历史 Reddit 社区讨论，请切换社媒/电商研究或在高级筛选中指定 Reddit。",
+        })
+      : discoverArchiveChannel(archiveRuntime, actor, req, parsed),
     discoverStoriesChannel(pool, actor, req, parsed),
   ]);
 

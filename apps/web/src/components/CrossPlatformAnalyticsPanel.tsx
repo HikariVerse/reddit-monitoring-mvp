@@ -214,7 +214,7 @@ export function CrossPlatformAnalyticsPanel({
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--muted)' }}>
-            <span className="tag" style={{ fontSize: 10 }}>stored_sample</span>
+            <span className="tag" style={{ fontSize: 10 }}>{t('Stored samples', '已存样本')}</span>
             <span>{t('Count / Matched', '主题 / 节点')}: <b>{facets ? totalCount : '—'}</b> / {facets ? totalMatched : '—'}</span>
             {providers.length > 0 && <span>· {t('Project providers', '项目渠道')}: {providers.join(', ')}</span>}
             <Button type="button" variant="ghost" size="icon-sm"

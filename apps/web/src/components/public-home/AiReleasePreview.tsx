@@ -65,8 +65,8 @@ export function AiReleasePreview({
             </div>
             <p>
               {t(
-                'Structured vendor release events will appear here automatically once the verified AI release API (/v1/ai/events) is enabled on this instance.',
-                '当前主干尚未启用结构化 AI 发布事件接口（/v1/ai/events）。接入后将在此自动展示已核验的近期模型发布与官方更新，不展示虚构时间线。',
+                'Structured vendor release events will appear here automatically once AI release feeds are enabled.',
+                '接入官方 AI 发布追踪源后，将在此自动展示已核验的近期模型发布与官方更新，不展示虚构时间线。',
               )}
             </p>
             <button

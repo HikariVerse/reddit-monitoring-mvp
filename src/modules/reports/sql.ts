@@ -391,7 +391,7 @@ export function formatReportSummary(row: ReportDocumentRow) {
   return {
     id: row.id,
     projectId: row.project_id,
-    projectDeleted: row.project_deleted,
+    projectDeleted: row.project_deleted || Boolean(row.project_id === null && scopes.some((sc) => Boolean(sc.projectId))),
     runId: row.run_id,
     scheduleId: row.schedule_id,
     template: row.template,

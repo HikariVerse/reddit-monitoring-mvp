@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 import sqlite3
 import time
@@ -15,6 +16,30 @@ import duckdb
 import pyarrow as pa
 
 from .packages import MonthPackage
+
+
+def _parallel_budget() -> int:
+    """Global heavy-analysis parallel budget = detected logical CPUs minus 1 (keeps UI/OS responsive)."""
+    raw = os.environ.get("ARCHIVE_PARALLEL_BUDGET")
+    if raw and raw.isdigit() and int(raw) >= 1:
+        return int(raw)
+    return max(1, (os.cpu_count() or 4) - 1)
+
+
+def _duckdb_config(config: dict[str, str] | None = None) -> dict[str, str]:
+    budget = _parallel_budget()
+    # Keep per-query DuckDB threads bounded so 2-3 concurrent runs stay <= global parallel budget (CPUs - 1)
+    default_threads = min(6, max(2, budget // 3))
+    threads = os.environ.get("ARCHIVE_DUCKDB_THREADS") or str(default_threads)
+    memory_limit = os.environ.get("ARCHIVE_DUCKDB_MEMORY_LIMIT") or ("4GB" if budget >= 8 else "1536MB")
+    return {
+        "threads": threads,
+        "memory_limit": memory_limit,
+        "preserve_insertion_order": "false",
+        "autoload_known_extensions": "false",
+        "autoinstall_known_extensions": "false",
+        **(config or {}),
+    }
 
 STOPWORDS = frozenset({
     "the", "be", "to", "of", "and", "a", "in", "that", "have", "i", "it", "for",
@@ -242,7 +267,7 @@ def _recall_candidates(packages: list[MonthPackage], fts_expr: str, doc_id: int 
         for shard in pkg.fts_shards
     ]
     matched: list[tuple[str, int]] = []
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(tasks)))) as pool:
+    with ThreadPoolExecutor(max_workers=min(_parallel_budget(), max(1, len(tasks)))) as pool:
         for part in pool.map(_query_shard, tasks):
             matched.extend(part)
             if len(matched) > MAX_TOTAL_RECALL:
@@ -313,16 +338,16 @@ def select_archive_threads(
         if not candidates:
             return SelectionResult(posts=[], comments=[], stats={"ftsCandidates": 0, "matchedPosts": 0, "matchedComments": 0})
         if need_verify:
-            clause, extra = _verification_sql(tree, spec.scopes, comments_union)
+            verify_scopes = spec.scopes if spec.include_comments else tuple(s for s in spec.scopes if s != "comments_text") or ("title", "body")
+            clause, extra = _verification_sql(tree, verify_scopes, comments_union if "comments_text" in verify_scopes else "")
             verification.append(clause)
-            verify_params.extend(_interleave_verify_params(clause, comments_union, comments_union_params, extra))
+            verify_params.extend(
+                _interleave_verify_params(clause, comments_union, comments_union_params, extra)
+                if "comments_text" in verify_scopes
+                else extra
+            )
 
-    con = duckdb.connect(config={
-        "threads": "2", "memory_limit": "1536MB",
-        "preserve_insertion_order": "false",
-        "autoload_known_extensions": "false", "autoinstall_known_extensions": "false",
-        **(config or {}),
-    })
+    con = duckdb.connect(config=_duckdb_config(config))
     try:
         where_clauses: list[str] = []
         params: list[Any] = []
@@ -587,18 +612,16 @@ def select_archive_for_analysis(
                 },
             )
         if need_verify:
-            clause, extra = _verification_sql(tree, spec.scopes, comments_union)
+            verify_scopes = spec.scopes if spec.include_comments else tuple(s for s in spec.scopes if s != "comments_text") or ("title", "body")
+            clause, extra = _verification_sql(tree, verify_scopes, comments_union if "comments_text" in verify_scopes else "")
             verification.append(clause)
-            verify_params.extend(_interleave_verify_params(clause, comments_union, comments_union_params, extra))
+            verify_params.extend(
+                _interleave_verify_params(clause, comments_union, comments_union_params, extra)
+                if "comments_text" in verify_scopes
+                else extra
+            )
 
-    con = duckdb.connect(config={
-        "threads": "2",
-        "memory_limit": "1536MB",
-        "preserve_insertion_order": "false",
-        "autoload_known_extensions": "false",
-        "autoinstall_known_extensions": "false",
-        **(config or {}),
-    })
+    con = duckdb.connect(config=_duckdb_config(config))
     try:
         where_clauses: list[str] = []
         params: list[Any] = []
@@ -930,14 +953,7 @@ def discover_archive_fast(
                 "elapsedMs": round((time.perf_counter() - t0) * 1000),
             }
 
-    con = duckdb.connect(config={
-        "threads": "4",
-        "memory_limit": "2560MB",
-        "preserve_insertion_order": "false",
-        "autoload_known_extensions": "false",
-        "autoinstall_known_extensions": "false",
-        **(config or {}),
-    })
+    con = duckdb.connect(config=_duckdb_config(config))
     try:
         scalar_cols = "doc_id, created_utc, community, score, reported_comments"
         verify_cols = f"{scalar_cols}, title, body" if run_verify else scalar_cols

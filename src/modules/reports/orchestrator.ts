@@ -519,7 +519,13 @@ export async function executeReportRun(
               : "live_content";
         const exploreRes = await archiveRuntime.runExplore(actor, {
           runId: `rep_${runId.replace(/-/g, "").slice(0, 16)}`,
-          query: sourceMode === "archive" ? (parsed.englishQuery || plan.topic) : (plan.topic || ""),
+          query:
+            plan.englishQuery?.trim() ||
+            (sourceMode === "archive"
+              ? parsed.englishQuery || plan.topic
+              : parsed.pgTerms.length > 0
+                ? parsed.pgTerms.join(" OR ")
+                : plan.topic || ""),
           sourceMode,
           projectId: sourceMode === "project_content" || (sourceMode === "archive" && archiveRefId) ? (projectId ?? undefined) : undefined,
           archiveRefId: sourceMode === "archive" ? (archiveRefId ?? undefined) : undefined,
