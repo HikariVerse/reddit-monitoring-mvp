@@ -3,6 +3,7 @@
 @import "tailwindcss/utilities.css" layer(utilities) source(none);
 @source "../components/ui";
 @source "../components/research";
+@source "../components/explore";
 @source "../pages/ContentExplorerPage.tsx";
 
 @custom-variant data-active (&[data-active]);

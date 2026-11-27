@@ -22,6 +22,13 @@ import duckdb
 import pyarrow.parquet as parquet
 from pyarrow import ArrowInvalid
 
+from .analytics import (
+    analyze_archive_scope,
+    analyze_documents_payload,
+    analytics_runtime_status,
+    get_analysis_progress,
+    resolve_study_evidence,
+)
 from .packages import discover_packages
 from .query import QuerySpec, select_archive_threads
 
@@ -34,6 +41,7 @@ PREVIEW_SIZE = 5
 COMMENT_LIMIT = 15
 MAX_MONTHS = 120
 MAX_BODY_BYTES = 16000
+MAX_ANALYTICS_BODY_BYTES = 16 * 1024 * 1024
 
 
 class ServiceError(Exception):
@@ -311,7 +319,14 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             return
         if self.path == "/health":
-            self._respond(200, {"status": "ok"})
+            self._respond(200, {"status": "ok", "analytics": analytics_runtime_status()})
+        elif self.path.startswith("/analyze/progress?runId="):
+            run_id = self.path.split("runId=", 1)[1].split("&", 1)[0]
+            progress = get_analysis_progress(run_id)
+            if progress is None:
+                self._respond(404, {"code": "progress_not_found"})
+            else:
+                self._respond(200, progress)
         elif self.path == "/archives":
             self._respond(*self.server.run_query("archives", None))
         else:
@@ -321,6 +336,18 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             return
         operation = self.path.removeprefix("/")
+        if operation in {"analyze/documents", "analyze/archive", "analyze/evidence"}:
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 1 <= length <= MAX_ANALYTICS_BODY_BYTES:
+                    self._respond(413, {"code": "invalid_body_size"})
+                    return
+                data = json.loads(self.rfile.read(length))
+            except (ValueError, socket.timeout):
+                self._respond(400, {"code": "invalid_json"})
+                return
+            self._handle_analytics(operation, data)
+            return
         if operation not in {"preview", "search", "evidence"}:
             self._respond(404, {"code": "unknown_operation"})
             return
@@ -334,6 +361,71 @@ class Handler(BaseHTTPRequestHandler):
             self._respond(400, {"code": "invalid_json"})
             return
         self._respond(*self.server.run_query(operation, data))
+
+    def _handle_analytics(self, operation, data):
+        if not isinstance(data, dict):
+            self._respond(400, {"code": "invalid_request"})
+            return
+        if not self.server.slots.acquire(blocking=False):
+            self._respond(503, {"code": "archive_busy"})
+            return
+        try:
+            if operation == "analyze/documents":
+                result = analyze_documents_payload(data)
+                self._respond(200, result)
+                return
+            if operation == "analyze/evidence":
+                study_id = str(data.get("studyId") or "")
+                evidence_id = str(data.get("evidenceId") or "")
+                offset = int(data.get("offset") or 0)
+                limit = int(data.get("limit") or 20)
+                result = resolve_study_evidence(study_id, evidence_id, offset=offset, limit=limit)
+                self._respond(200, result)
+                return
+            # analyze/archive
+            catalog, packages = _catalog(self.server.root)
+            req_months = data.get("months")
+            selected = [pkg for pkg in packages if pkg.month in req_months] if isinstance(req_months, list) and req_months else packages
+            if not selected:
+                self._respond(409, {"code": "archive_month_unavailable"})
+                return
+            subreddits = tuple(str(s).lower() for s in (data.get("subreddits") or []) if isinstance(s, str) and SUBREDDIT.fullmatch(s))
+            with tempfile.TemporaryDirectory(prefix="r4-analyze-") as temp:
+                duckdb_cfg = {**self.server.config, "temp_directory": Path(temp).as_posix()}
+                result = analyze_archive_scope(
+                    selected,
+                    version=catalog["version"],
+                    query=str(data.get("query") or ""),
+                    subreddits=subreddits,
+                    from_iso=data.get("from") if isinstance(data.get("from"), str) else None,
+                    to_iso=data.get("to") if isinstance(data.get("to"), str) else None,
+                    include_comments=bool(data.get("includeComments", False)),
+                    group_by=str(data.get("groupBy") or "group"),
+                    profile=str(data.get("profile") or "fast"),
+                    limit=int(data.get("limit") or 1000),
+                    duckdb_config=duckdb_cfg,
+                    run_id=str(data.get("runId") or "") or None,
+                )
+            self._respond(200, result)
+        except ServiceError as error:
+            self._respond(error.status, {"code": error.code})
+        except KeyError:
+            self._respond(404, {"code": "evidence_not_found"})
+        except ValueError as error:
+            if "recall exceeded" in str(error):
+                self._respond(422, {"code": "recall_limit"})
+            else:
+                self._respond(400, {"code": "invalid_query"})
+        except duckdb.OutOfMemoryException:
+            logging.warning("Explore analytics DuckDB OOM")
+            self._respond(503, {"code": "query_resource_limit"})
+        except BrokenPipeError:
+            logging.warning("Explore analytics client disconnected before response completed")
+        except Exception as error:
+            logging.warning("Explore analytics failed: %s", error)
+            self._respond(503, {"code": "analytics_unavailable"})
+        finally:
+            self.server.slots.release()
 
 
 def main():

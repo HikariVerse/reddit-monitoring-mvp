@@ -14,6 +14,7 @@ import { fail, AppError } from "../../shared/errors";
 import { transaction } from "../../storage/db";
 import { loadEffectivePolicyForUser } from "../collection/index";
 import { assertProjectWritable, projectSources } from "../projects/index";
+import { registerExploreRoutes } from "./explore-routes";
 
 const EmptyFilters = { query: "", subreddits: [], from: null, to: null };
 const publicErrors: Record<string, number> = {
@@ -233,5 +234,32 @@ export async function registerArchiveAnalysisModule(app: FastifyInstance, pool: 
   api.post(base + "/:refId/evidence", { config: read, schema: { params: ArchiveRefParams, body: ArchiveEvidence, response: { 200: ArchiveThread } } }, async request => {
     const ref = await reference(request.actor!, request.params.id, request.params.refId);
     return callArchive<ArchiveThread>(config, "evidence", { ...request.body, ...selectionOf(ref), reference: ref.id });
+  });
+
+  registerExploreRoutes(app, pool, {
+    enabled: config.enabled,
+    url: config.url,
+    token: config.token,
+    timeoutMs: config.timeoutMs,
+    checkArchiveStatus: async (db, actor) => {
+      try {
+        const source = await requireSource(db, actor);
+        checkingCatalog ??= callArchive<ArchiveCatalog>(config, "archives").finally(() => {
+          checkingCatalog = undefined;
+        });
+        const catalog = await checkingCatalog;
+        return {
+          available: true,
+          state: "available",
+          months: catalog.months.map((m) => m.month),
+          version: catalog.version,
+          sourceId: source.id,
+        };
+      } catch (error) {
+        if (!(error instanceof AppError)) throw error;
+        return { available: false, state: error.message, months: [] };
+      }
+    },
+    getProjectArchiveRef: async (actor, projectId, refId) => reference(actor, projectId, refId),
   });
 }

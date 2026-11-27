@@ -242,7 +242,7 @@ def _recall_candidates(packages: list[MonthPackage], fts_expr: str, doc_id: int 
         for shard in pkg.fts_shards
     ]
     matched: list[tuple[str, int]] = []
-    with ThreadPoolExecutor(max_workers=min(4, max(1, len(tasks)))) as pool:
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(tasks)))) as pool:
         for part in pool.map(_query_shard, tasks):
             matched.extend(part)
             if len(matched) > MAX_TOTAL_RECALL:
@@ -319,6 +319,7 @@ def select_archive_threads(
 
     con = duckdb.connect(config={
         "threads": "2", "memory_limit": "1536MB",
+        "preserve_insertion_order": "false",
         "autoload_known_extensions": "false", "autoinstall_known_extensions": "false",
         **(config or {}),
     })
@@ -332,8 +333,26 @@ def select_archive_threads(
                 "doc_id": pa.array([d for _, d in candidates], type=pa.uint32()),
             })
             con.register("fts_candidates", cand_tbl)
-            from_sql = f"FROM ({posts_union}) p INNER JOIN fts_candidates fc ON p.month = fc.month AND p.doc_id = fc.doc_id"
-            params.extend(posts_union_params)
+            by_month: dict[str, list[int]] = {}
+            for m, d in candidates:
+                by_month.setdefault(m, []).append(d)
+            pruned_parts: list[str] = []
+            pruned_params: list[Any] = []
+            for pkg in packages:
+                m_ids = by_month.get(pkg.month)
+                if not m_ids:
+                    continue
+                lo, hi = min(m_ids), max(m_ids)
+                pruned_parts.append(
+                    f"SELECT ? AS month, {posts_cols} FROM read_parquet(?) "
+                    f"WHERE doc_id BETWEEN ? AND ? "
+                    f"AND doc_id IN (SELECT doc_id FROM fts_candidates WHERE month = ?)"
+                )
+                pruned_params.extend([pkg.month, pkg.posts_parquet.as_posix(), lo, hi, pkg.month])
+            if not pruned_parts:
+                return SelectionResult(posts=[], comments=[], stats={"ftsCandidates": len(candidates), "matchedPosts": 0, "matchedComments": 0})
+            from_sql = f"FROM ({' UNION ALL '.join(pruned_parts)}) p"
+            params.extend(pruned_params)
         else:
             from_sql = f"FROM ({posts_union}) p"
             params.extend(posts_union_params)
@@ -456,6 +475,396 @@ def select_archive_threads(
                 "matchedComments": len(comments),
                 "months": [p.month for p in packages],
                 **({"archivedComments": archived_comments, "comment": selected_comment} if evidence else {}),
+            },
+        )
+    finally:
+        con.close()
+
+
+def _allocate_daily_quotas(daily_counts: list[tuple[str, int]], limit: int) -> dict[str, int]:
+    """Allocate exact per-day sample quotas proportional to daily volume, covering every active day when possible."""
+    if not daily_counts or limit <= 0:
+        return {}
+    total = sum(cnt for _, cnt in daily_counts)
+    if total <= limit:
+        return {day: cnt for day, cnt in daily_counts}
+    n_days = len(daily_counts)
+    if n_days >= limit:
+        # Spread 1 sample evenly across `limit` days spanning the full range.
+        quotas: dict[str, int] = {}
+        for i in range(limit):
+            idx = min(n_days - 1, int(i * n_days / limit))
+            day = daily_counts[idx][0]
+            quotas[day] = quotas.get(day, 0) + 1
+        return quotas
+
+    # Reserve 1 slot per active day so no active day collapses to 0, then distribute remaining proportionally.
+    quotas = {day: 1 for day, _ in daily_counts}
+    remaining = limit - n_days
+    excess = [(day, max(0, cnt - 1)) for day, cnt in daily_counts]
+    excess_total = sum(c for _, c in excess)
+    if remaining > 0 and excess_total > 0:
+        remainders: list[tuple[float, str]] = []
+        for day, cap in excess:
+            if cap <= 0:
+                continue
+            exact = remaining * (cap / excess_total)
+            add = min(cap, int(exact))
+            quotas[day] += add
+            remainders.append((exact - add, day))
+        used = sum(quotas.values())
+        leftover = limit - used
+        if leftover > 0:
+            cap_map = {day: cnt for day, cnt in daily_counts}
+            for _, day in sorted(remainders, key=lambda x: (-x[0], x[1])):
+                if leftover <= 0:
+                    break
+                if quotas[day] < cap_map[day]:
+                    quotas[day] += 1
+                    leftover -= 1
+    return quotas
+
+
+def select_archive_for_analysis(
+    packages: list[MonthPackage],
+    spec: QuerySpec,
+    *,
+    config: dict[str, str] | None = None,
+) -> SelectionResult:
+    """Select archive posts for analytics with exact full-corpus daily census and stratified-by-day sampling.
+
+    Unlike `select_archive_threads` (which returns the latest `ORDER BY created_utc DESC LIMIT N` posts for
+    paginated browsing), analytics needs a temporally representative sample across the entire matched date
+    range plus exact daily hit counts for SL02 and anomaly detection.
+    """
+    if not packages:
+        raise ValueError("No open-corpus-v1 packages found")
+    if spec.limit < 1:
+        raise ValueError("limit must be >= 1")
+    if any(s not in ALL_SCOPES for s in spec.scopes) or not spec.scopes:
+        raise ValueError(f"Invalid search scopes: {spec.scopes}")
+
+    normalized_subs = tuple(dict.fromkeys(s.strip().lower() for s in spec.subreddits if s.strip()))
+    if not spec.query.strip() and not normalized_subs and not spec.allow_unscoped:
+        raise ValueError("Provide at least --query or --subreddits (or pass --allow-unscoped)")
+
+    from_epoch = _parse_iso_to_epoch(spec.from_iso, ceil=False)
+    to_epoch = _parse_iso_to_epoch(spec.to_iso, ceil=False)
+    if from_epoch is not None and to_epoch is not None and from_epoch >= to_epoch:
+        raise ValueError("--from must be strictly earlier than --to")
+
+    tree = parse_boolean_query(spec.query)
+    candidates: list[tuple[str, int]] | None = None
+    verification: list[str] = []
+    verify_params: list[str] = []
+
+    posts_cols = (
+        "doc_id, content_key, created_utc, community, author_key, "
+        "score, reported_comments, content_type, domain, flair, title, body, is_truncated"
+    )
+    comments_cols = "comment_id, post_doc_id, parent_key, created_utc, author_key, score, is_op, body"
+    posts_union, posts_union_params = _union_sql(packages, "posts_parquet", posts_cols)
+    comments_union, comments_union_params = _union_sql(packages, "comments_parquet", comments_cols)
+
+    if tree is not None:
+        narrow = set(spec.scopes) != set(ALL_SCOPES)
+        need_verify = _has_phrase(tree) or narrow
+        expr = _fts_expr(tree, relaxed=need_verify)
+        recalled = _recall_candidates(packages, expr, None, immutable=False)
+        candidates = list(dict.fromkeys(recalled))
+        if not candidates:
+            return SelectionResult(
+                posts=[],
+                comments=[],
+                stats={
+                    "ftsCandidates": 0,
+                    "totalMatched": 0,
+                    "matchedPosts": 0,
+                    "matchedComments": 0,
+                    "retrievalByDay": [],
+                    "months": [p.month for p in packages],
+                    "sampled": False,
+                },
+            )
+        if need_verify:
+            clause, extra = _verification_sql(tree, spec.scopes, comments_union)
+            verification.append(clause)
+            verify_params.extend(_interleave_verify_params(clause, comments_union, comments_union_params, extra))
+
+    con = duckdb.connect(config={
+        "threads": "2",
+        "memory_limit": "1536MB",
+        "preserve_insertion_order": "false",
+        "autoload_known_extensions": "false",
+        "autoinstall_known_extensions": "false",
+        **(config or {}),
+    })
+    try:
+        where_clauses: list[str] = []
+        params: list[Any] = []
+        pkg_by_month = {pkg.month: pkg for pkg in packages}
+
+        if candidates is not None:
+            cand_tbl = pa.table({
+                "month": pa.array([m for m, _ in candidates], type=pa.string()),
+                "doc_id": pa.array([d for _, d in candidates], type=pa.uint32()),
+            })
+            con.register("fts_candidates", cand_tbl)
+            by_month: dict[str, list[int]] = {}
+            for m, d in candidates:
+                by_month.setdefault(m, []).append(d)
+            pruned_parts: list[str] = []
+            pruned_params: list[Any] = []
+            for pkg in packages:
+                m_ids = by_month.get(pkg.month)
+                if not m_ids:
+                    continue
+                lo, hi = min(m_ids), max(m_ids)
+                pruned_parts.append(
+                    f"SELECT ? AS month, {posts_cols} FROM read_parquet(?) "
+                    f"WHERE doc_id BETWEEN ? AND ? "
+                    f"AND doc_id IN (SELECT doc_id FROM fts_candidates WHERE month = ?)"
+                )
+                pruned_params.extend([pkg.month, pkg.posts_parquet.as_posix(), lo, hi, pkg.month])
+            if not pruned_parts:
+                return SelectionResult(
+                    posts=[],
+                    comments=[],
+                    stats={
+                        "ftsCandidates": len(candidates),
+                        "totalMatched": 0,
+                        "matchedPosts": 0,
+                        "matchedComments": 0,
+                        "retrievalByDay": [],
+                        "months": [p.month for p in packages],
+                        "sampled": False,
+                    },
+                )
+            from_sql = f"FROM ({' UNION ALL '.join(pruned_parts)}) p"
+            params.extend(pruned_params)
+        else:
+            from_sql = f"FROM ({posts_union}) p"
+            params.extend(posts_union_params)
+
+        if normalized_subs:
+            placeholders = ",".join("?" for _ in normalized_subs)
+            where_clauses.append(f"p.community IN ({placeholders})")
+            params.extend(normalized_subs)
+        if from_epoch is not None:
+            where_clauses.append("p.created_utc >= ?")
+            params.append(from_epoch)
+        if to_epoch is not None:
+            where_clauses.append("p.created_utc < ?")
+            params.append(to_epoch)
+        if spec.min_score is not None:
+            where_clauses.append("p.score >= ?")
+            params.append(spec.min_score)
+        if spec.min_comments is not None:
+            where_clauses.append("p.reported_comments >= ?")
+            params.append(spec.min_comments)
+        where_clauses.extend(verification)
+        params.extend(verify_params)
+        where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        if candidates is not None:
+            # Materialize lightweight matched keys once (<= 500k rows -> a few MB) for census + stratified sampling.
+            con.execute(
+                f"""
+                CREATE TEMP TABLE matched_keys AS
+                SELECT p.month, p.doc_id, p.created_utc,
+                       strftime(to_timestamp(p.created_utc), '%Y-%m-%d') AS day
+                {from_sql}
+                {where_sql}
+                """,
+                params,
+            )
+            daily_rows = con.execute(
+                "SELECT day, COUNT(*)::BIGINT AS cnt FROM matched_keys WHERE day IS NOT NULL GROUP BY day ORDER BY day ASC"
+            ).fetchall()
+        else:
+            # Unscoped full-archive browse: aggregate daily counts without materializing 31M keys.
+            daily_rows = con.execute(
+                f"""
+                SELECT strftime(to_timestamp(p.created_utc), '%Y-%m-%d') AS day, COUNT(*)::BIGINT AS cnt
+                {from_sql}
+                {where_sql}
+                GROUP BY 1
+                ORDER BY 1 ASC
+                """,
+                params,
+            ).fetchall()
+
+        daily_counts = [(str(r[0]), int(r[1])) for r in daily_rows if r[0] is not None]
+        total_matched = sum(cnt for _, cnt in daily_counts)
+        retrieval_by_day = [{"month": day[:7], "date": day, "count": cnt} for day, cnt in daily_counts]
+
+        if total_matched == 0:
+            return SelectionResult(
+                posts=[],
+                comments=[],
+                stats={
+                    "ftsCandidates": len(candidates) if candidates is not None else None,
+                    "totalMatched": 0,
+                    "matchedPosts": 0,
+                    "matchedComments": 0,
+                    "retrievalByDay": [],
+                    "months": [p.month for p in packages],
+                    "sampled": False,
+                },
+            )
+
+        quotas = _allocate_daily_quotas(daily_counts, spec.limit)
+        quota_tbl = pa.table({
+            "day": pa.array(list(quotas.keys()), type=pa.string()),
+            "quota": pa.array(list(quotas.values()), type=pa.int64()),
+            "day_total": pa.array([dict(daily_counts)[d] for d in quotas.keys()], type=pa.int64()),
+        })
+        con.register("day_quotas", quota_tbl)
+
+        if candidates is not None:
+            if total_matched <= spec.limit:
+                selected_keys = con.execute("SELECT month, doc_id FROM matched_keys").fetchall()
+            else:
+                selected_keys = con.execute(
+                    """
+                    WITH ranked AS (
+                        SELECT mk.month, mk.doc_id, dq.quota,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY mk.day
+                                   ORDER BY hash(mk.month, mk.doc_id)
+                               ) AS rn
+                        FROM matched_keys mk
+                        INNER JOIN day_quotas dq ON mk.day = dq.day
+                    )
+                    SELECT month, doc_id
+                    FROM ranked
+                    WHERE rn <= quota
+                    """
+                ).fetchall()
+        else:
+            # Pre-filter deterministically per day with ~4x oversampling margin so DuckDB buffers O(limit) rows.
+            selected_keys = con.execute(
+                f"""
+                WITH pre AS (
+                    SELECT p.month, p.doc_id, dq.day, dq.quota, dq.day_total,
+                           hash(p.month, p.doc_id) AS h
+                    {from_sql}
+                    INNER JOIN day_quotas dq
+                      ON strftime(to_timestamp(p.created_utc), '%Y-%m-%d') = dq.day
+                    {where_sql}
+                ),
+                filtered AS (
+                    SELECT month, doc_id, day, quota, h
+                    FROM pre
+                    WHERE (h % 1000000) < LEAST(
+                        1000000,
+                        GREATEST(5000, CAST(CEIL((quota * 4.0 / GREATEST(1, day_total)) * 1000000) AS BIGINT))
+                    )
+                ),
+                ranked AS (
+                    SELECT month, doc_id, quota,
+                           ROW_NUMBER() OVER (PARTITION BY day ORDER BY h) AS rn
+                    FROM filtered
+                )
+                SELECT month, doc_id
+                FROM ranked
+                WHERE rn <= quota
+                """,
+                params,
+            ).fetchall()
+
+        if not selected_keys:
+            return SelectionResult(
+                posts=[],
+                comments=[],
+                stats={
+                    "ftsCandidates": len(candidates) if candidates is not None else None,
+                    "totalMatched": total_matched,
+                    "matchedPosts": 0,
+                    "matchedComments": 0,
+                    "retrievalByDay": retrieval_by_day,
+                    "months": [p.month for p in packages],
+                    "sampled": total_matched > 0,
+                },
+            )
+
+        sel_tbl = pa.table({
+            "month": pa.array([str(m) for m, _ in selected_keys], type=pa.string()),
+            "doc_id": pa.array([int(d) for _, d in selected_keys], type=pa.uint32()),
+        })
+        con.register("sampled_keys", sel_tbl)
+        sel_by_month: dict[str, list[int]] = {}
+        for m, d in selected_keys:
+            sel_by_month.setdefault(str(m), []).append(int(d))
+
+        fetch_parts: list[str] = []
+        fetch_params: list[Any] = []
+        for month, m_ids in sel_by_month.items():
+            pkg = pkg_by_month.get(month)
+            if not pkg or not m_ids:
+                continue
+            lo, hi = min(m_ids), max(m_ids)
+            fetch_parts.append(
+                f"SELECT ? AS month, {posts_cols} FROM read_parquet(?) "
+                f"WHERE doc_id BETWEEN ? AND ? "
+                f"AND doc_id IN (SELECT doc_id FROM sampled_keys WHERE month = ?)"
+            )
+            fetch_params.extend([month, pkg.posts_parquet.as_posix(), lo, hi, month])
+
+        post_sql = f"""
+            SELECT p.month, p.doc_id, p.content_key, p.created_utc, p.community,
+                   p.author_key, p.score, p.reported_comments, p.content_type,
+                   p.domain, p.flair, p.title, p.body, COALESCE(p.is_truncated, false) AS is_truncated
+            FROM ({' UNION ALL '.join(fetch_parts)}) p
+            ORDER BY p.created_utc DESC, p.month ASC, p.doc_id ASC
+        """
+        cur = con.execute(post_sql, fetch_params)
+        col_names = [d[0] for d in cur.description]
+        posts = [dict(zip(col_names, row)) for row in cur.fetchall()]
+
+        comments: list[dict[str, Any]] = []
+        if spec.include_comments and spec.max_comments_per_post > 0 and posts:
+            post_keys_tbl = pa.table({
+                "month": pa.array([p["month"] for p in posts], type=pa.string()),
+                "post_doc_id": pa.array([p["doc_id"] for p in posts], type=pa.uint32()),
+                "post_content_key": pa.array([p["content_key"] for p in posts], type=pa.string()),
+                "community": pa.array([p["community"] for p in posts], type=pa.string()),
+            })
+            con.register("matched_posts", post_keys_tbl)
+            comment_sql = f"""
+                WITH ranked AS (
+                    SELECT c.month, c.comment_id, c.post_doc_id, c.parent_key,
+                           c.created_utc, c.author_key, c.score, c.is_op, c.body,
+                           mp.post_content_key, mp.community,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY c.month, c.post_doc_id
+                               ORDER BY c.is_op DESC, c.score DESC, c.created_utc ASC, c.comment_id ASC
+                           ) AS rn
+                    FROM ({comments_union}) c
+                    INNER JOIN matched_posts mp
+                      ON c.month = mp.month AND c.post_doc_id = mp.post_doc_id
+                )
+                SELECT month, comment_id, post_doc_id, parent_key, created_utc,
+                       author_key, score, is_op, body, post_content_key, community
+                FROM ranked
+                WHERE rn <= ?
+                ORDER BY month ASC, post_doc_id ASC, rn ASC
+            """
+            ccur = con.execute(comment_sql, [*comments_union_params, spec.max_comments_per_post])
+            ccols = [d[0] for d in ccur.description]
+            comments = [dict(zip(ccols, row)) for row in ccur.fetchall()]
+
+        return SelectionResult(
+            posts=posts,
+            comments=comments,
+            stats={
+                "ftsCandidates": len(candidates) if candidates is not None else None,
+                "totalMatched": total_matched,
+                "matchedPosts": len(posts),
+                "matchedComments": len(comments),
+                "retrievalByDay": retrieval_by_day,
+                "months": [p.month for p in packages],
+                "sampled": total_matched > len(posts),
             },
         )
     finally:

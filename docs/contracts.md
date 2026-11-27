@@ -63,7 +63,7 @@
 
 ---
 
-## 5. 已注册全量 HTTP 路由清册（`check:openapi` 实测：`155` 路径 / `180` 操作）
+## 5. 已注册全量 HTTP 路由清册（`check:openapi` 实测：`159` 路径 / `184` 操作）
 
 ### R4 项目归档
 
@@ -86,7 +86,7 @@
 | **Intelligence [V2] (20 / 25)** | `GET/POST /v1/intelligence/monitors`、`GET/PATCH/DELETE /v1/intelligence/monitors/:id`、`POST /v1/intelligence/monitors/:id/{estimate,collect}`、`GET /v1/intelligence/monitors/:id/{overview,posts}`、`GET /v1/intelligence/authors`、`GET /v1/intelligence/authors/:platform/:handle`、`GET /v1/intelligence/communities`、`GET /v1/intelligence/communities/:subreddit`、`GET /v1/intelligence/admin/legacy-sources`、`POST /v1/intelligence/admin/legacy-sources/:id/reconcile`、`GET /v1/intelligence/admin/ops-summary`、`POST /v1/intelligence/admin/monitors/:id/reconcile`、`POST /v1/projects/:id/research/l2`、`GET/POST /v1/projects/:id/research/tasks`、`GET/DELETE /v1/projects/:id/research/tasks/:taskId`、`POST /v1/projects/:id/research/tasks/:taskId/{cancel,retry}`、`GET /v1/projects/:id/research/tasks/:taskId/evidence` |
 | **Projects (11 / 15)** | `GET/POST /v1/projects`、`GET/PATCH/DELETE /v1/projects/:id`、`POST /v1/projects/:id/{publish,fork}`、`GET /v1/projects/:id/overview`、`POST /v1/projects/:id/hydrate`、`GET/POST /v1/projects/:id/batches`、`PATCH /v1/projects/:id/batches/:batchId`、`POST /v1/projects/:id/batches/:batchId/move`、`GET /v1/projects/:id/research/scope`、`POST /v1/projects/:id/research/l1` |
 | **Docs (4 / 6)** | `GET/POST /v1/docs`、`GET /v1/docs/:slug`、`GET /v1/docs/:slug/file`、`PATCH/DELETE /v1/docs/:id` |
-| **Archive Analysis (6 / 7)** | `GET /v1/projects/:id/archives/status`、`GET/POST /v1/projects/:id/archives`、`POST /v1/projects/:id/archives/preview`、`DELETE /v1/projects/:id/archives/:refId`、`POST /v1/projects/:id/archives/:refId/{search,evidence}` |
+| **Archive Analysis (10 / 11)** | `GET /v1/projects/:id/archives/status`、`GET/POST /v1/projects/:id/archives`、`POST /v1/projects/:id/archives/preview`、`DELETE /v1/projects/:id/archives/:refId`、`POST /v1/projects/:id/archives/:refId/{search,evidence}`、`GET /v1/explore/capabilities`、`GET /v1/explore/progress/:runId`、`POST /v1/explore/{analyze,evidence}` |
 | **Workspace (4 / 6)** | `GET/POST /v1/workspace/queries`、`DELETE /v1/workspace/queries/:id`、`GET /v1/workspace/annotations`、`GET/PUT /v1/workspace/annotations/:id` |
 | **AI Catalog Public (8 / 8)** | `GET /v1/ai/{vendors,models,events,updates,rankings}`、`GET /v1/ai/{models,events,rankings}/:id` |
 | **AI Admin (27 / 32)** | `GET /v1/admin/ai/{queue,sources,sync-runs,history/status,rankings}`、`GET /v1/admin/ai/ops/{summary,audit}`、`PATCH /v1/admin/ai/candidates/:id`、`POST /v1/admin/ai/candidates/bulk-dismiss`、`POST /v1/admin/ai/candidates/:id/{publish,reject}`、`GET/POST /v1/admin/ai/events`、`PATCH/DELETE /v1/admin/ai/events/:id`、`POST /v1/admin/ai/events/:id/{unpublish,rollback}`、`POST /v1/admin/ai/{models,aliases,discovery/run}`、`PATCH /v1/admin/ai/sources/:code`、`POST /v1/admin/ai/sources/:code/sync`、`GET /v1/admin/ai/credentials`、`PUT/DELETE /v1/admin/ai/credentials/:provider`、`POST /v1/admin/ai/credentials/:provider/test`、`PATCH /v1/admin/ai/vendors/:id/autopublish`、`POST /v1/admin/ai/alerts/:id/resolve`、`GET/PUT /v1/admin/ai/vendor-sources`、`DELETE /v1/admin/ai/vendor-sources/:sourceId/:vendorId` |

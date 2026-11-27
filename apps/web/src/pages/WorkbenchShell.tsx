@@ -702,7 +702,7 @@ export function WorkbenchShell({
               </div>
               <p className="side-domain-desc">
                 {activeDomain === 'explore'
-                  ? t('Offline Reddit archives', '离线 Reddit 归档')
+                  ? t('Multi-source keyword analytics & offline Reddit archives', '多源关键词洞察分析与离线归档检索')
                   : activeDomain === 'ops'
                   ? t('Manage collection sources, schedules & channel policies.', '管理采集来源、调度与渠道策略。')
                   : activeDomain === 'settings'
@@ -720,11 +720,18 @@ export function WorkbenchShell({
         {/* Domain-Scoped Secondary Navigation */}
         <nav className="side-nav" aria-label={t('Primary navigation', '工作台导航')}>
           {activeDomain === 'explore' && (
-            <button type="button" className="nav-item is-active" aria-current="page"
-              onClick={() => navigateAndClose(currentSearch ? '/explore?' + currentSearch : '/explore')}>
-              <Search size={17} className="nav-ic" aria-hidden="true" />
-              <span>{t('Archive Explore', '归档探索')}</span>
-            </button>
+            <div className="nav-group">
+              <p className="nav-label">{t('Explore Modules', '探索模块')}</p>
+              <button
+                type="button"
+                className="nav-item is-active"
+                aria-current="page"
+                onClick={() => navigateAndClose(resolvedProject ? `/explore?projectId=${encodeURIComponent(resolvedProject.id)}` : '/explore')}
+              >
+                <Sparkles size={17} className="nav-ic" aria-hidden="true" />
+                <span>{t('Insights Explore', '智能洞察探索')}</span>
+              </button>
+            </div>
           )}
           {activeDomain === 'feed' && (
             <>

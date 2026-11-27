@@ -2,3 +2,6 @@
 !pyproject.toml
 !zst_archive/
 !zst_archive/*.py
+!analytics_core/
+!analytics_core/**/*.py
+!analytics_core/*.py
