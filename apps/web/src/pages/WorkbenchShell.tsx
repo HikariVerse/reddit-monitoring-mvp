@@ -6,13 +6,16 @@ import {
   Bookmark,
   BookOpen,
   Calendar,
+  ChevronDown,
+  ChevronRight,
+  Clock,
   Command,
   Database,
   ExternalLink,
+  FileText,
   Flame,
   FolderKanban,
   Globe,
-  Grid,
   HelpCircle,
   Key,
   Layers,
@@ -43,7 +46,7 @@ import {
   useSavedQueriesQuery,
   useSourcesQuery,
 } from '../api/hooks';
-import { ProjectSwitcher } from '../components/ProjectSwitcher';
+import { useReportRunsQuery } from '../api/reports';
 import { AssistantBubbleIcon, SiftlineLogo } from '../components/BrandMark';
 import { Progress } from '../components/ui/progress';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
@@ -53,7 +56,7 @@ import { type Actor, type CapabilitiesResponse, validateSearchTerm } from '../co
 import { useI18n } from '../i18n/translations';
 import { isResearchSource } from '../lib/collectionLimits';
 
-export type WorkbenchRoute = '/app/feed' | '/explore' | '/projects' | '/content' | '/sources' | '/workspace' | '/assistant' | '/settings' | '/admin/queue';
+export type WorkbenchRoute = '/reports' | '/app/feed' | '/explore' | '/projects' | '/content' | '/sources' | '/workspace' | '/assistant' | '/settings' | '/admin/queue';
 
 interface WorkbenchShellProps {
   actor: Actor | null;
@@ -93,7 +96,8 @@ function computeQuotaStats(
   return { pct, used: fmt(totalUsed), cap: fmt(totalCap), status: pct >= 100 ? 'exhausted' : pct >= 80 ? 'warning' : 'normal' };
 }
 
-function resolveShellActiveDomain(route: string, canWrite: boolean): 'feed' | 'research' | 'explore' | 'ops' | 'assistant' | 'settings' {
+function resolveShellActiveDomain(route: string, canWrite: boolean): 'reports' | 'feed' | 'research' | 'explore' | 'ops' | 'assistant' | 'settings' {
+  if (route === '/reports' || route.startsWith('/reports/')) return 'reports';
   if (route === '/explore') return 'explore';
   if (route === '/assistant') return 'assistant';
   if (route === '/settings') return 'settings';
@@ -193,14 +197,21 @@ export function WorkbenchShell({
   const budgetsQuery = useBudgetsQuery(canWrite);
   const quotasSummaryQuery = useQuotasSummaryQuery(isAuthed);
   const viewerJobsQuery = useRecentJobsQuery({ limit: 5 }, isAuthed && !canWrite);
+  const recentRunsQuery = useReportRunsQuery({ limit: 6 }, isAuthed);
 
   const projects = useMemo(() => projectsQuery.data?.projects ?? [], [projectsQuery.data?.projects]);
   const sources = useMemo(() => sourcesQuery.data?.sources ?? [], [sourcesQuery.data?.sources]);
   const savedQueries = queriesQuery.data?.queries || [];
   const annotations = annotationsQuery.data?.annotations || [];
   const budgets = useMemo(() => budgetsQuery.data?.budgets ?? [], [budgetsQuery.data?.budgets]);
+  const recentReportRuns = useMemo(() => recentRunsQuery.data?.runs ?? [], [recentRunsQuery.data?.runs]);
+  const activeRunCount = useMemo(
+    () => recentReportRuns.filter((r) => ['preparing', 'collecting', 'analyzing', 'writing', 'cancel_requested'].includes(r.state)).length,
+    [recentReportRuns],
+  );
 
   const [collapsed, setCollapsed] = useState(false);
+  const [recentOpen, setRecentOpen] = useState(true);
   const [mobileSideOpen, setMobileSideOpen] = useState(false);
   const [quickTerm, setQuickTerm] = useState('');
   const [quickErr, setQuickErr] = useState<string | null>(null);
@@ -246,8 +257,9 @@ export function WorkbenchShell({
     : projects.find(project => project.id === selectedProjectId) ?? projects[0];
 
   const activeDomain = resolveShellActiveDomain(route, canWrite);
-  const pidQs = resolvedProject ? `&projectId=${encodeURIComponent(resolvedProject.id)}` : '';
-  const pidQueryOnly = resolvedProject ? `?projectId=${encodeURIComponent(resolvedProject.id)}` : '';
+  void selectedProjectId;
+  void onSelectProjectId;
+  void resolvedProject;
 
   const shellRef = useRef<HTMLDivElement>(null);
 
@@ -356,6 +368,9 @@ export function WorkbenchShell({
 
   const paletteCommands = useMemo(
     () => [
+      { group: t('Reports', '报告'), label: t('Report Workbench', '报告工作台'), kbd: 'G B', run: () => navigateAndClose('/reports') },
+      { group: t('Reports', '报告'), label: t('Create New Report', '创建研究报告'), kbd: 'N R', run: () => navigateAndClose('/reports/new') },
+      { group: t('Reports', '报告'), label: t('My Reports & Schedules', '我的报告与周期计划'), kbd: 'G L', run: () => navigateAndClose('/reports?view=list') },
       { group: t('Feed', '信息流'), label: t('Public Information Home', '公开信息首页'), kbd: 'G I', run: () => navigateAndClose('/') },
       { group: t('Feed', '信息流'), label: t("Today's Stories", '完整信息流 · 今日精选'), kbd: 'G H', run: () => navigateAndClose('/app/feed') },
       { group: t('Feed', '信息流'), label: t('48h Momentum', '48 小时热度'), kbd: 'G T', run: () => navigateAndClose('/app/feed?view=hot') },
@@ -365,17 +380,18 @@ export function WorkbenchShell({
       { group: t('Feed', '信息流'), label: t('Product Overview', '产品介绍'), kbd: 'G P', run: () => navigateAndClose('/product') },
       { group: t('Feed', '信息流'), label: t('Product Docs', '产品文档'), kbd: 'G ?', run: () => navigateAndClose('/docs') },
       { group: t('Feed', '信息流'), label: t('Product Guide', '产品使用说明'), kbd: 'G U', run: () => navigateAndClose('/guide') },
-      { group: t('Navigate', '页面跳转'), label: t('Content Research', '内容研究'), kbd: 'G O', run: () => navigateAndClose('/projects') },
-      { group: t('Navigate', '页面跳转'), label: t('Intelligence Insights (V2)', '智能监测洞察 (V2)'), kbd: 'G V', run: () => navigateAndClose('/projects?view=intelligence') },
-      { group: t('Navigate', '页面跳转'), label: t('Explore', '探索'), run: () => navigateAndClose('/explore') },
-      { group: t('Navigate', '页面跳转'), label: t('Content Search', '内容检索'), kbd: 'G E', run: () => navigateAndClose('/content') },
+      { group: t('Navigate', '页面跳转'), label: t('All Research Studies', '全部研究'), kbd: 'G O', run: () => navigateAndClose('/projects?view=list') },
+      { group: t('Navigate', '页面跳转'), label: t('Available Materials', '可用资料'), kbd: 'G M', run: () => navigateAndClose('/projects?view=resources') },
+      { group: t('Navigate', '页面跳转'), label: t('Task Records', '任务记录'), kbd: 'G J', run: () => navigateAndClose('/projects?view=my-jobs') },
+      { group: t('Navigate', '页面跳转'), label: t('Explore', '智能洞察探索'), run: () => navigateAndClose('/explore') },
+      { group: t('Navigate', '页面跳转'), label: t('Content Search', '原文检索'), kbd: 'G E', run: () => navigateAndClose('/content') },
       ...(canWrite
         ? [
             { group: t('Navigate', '页面跳转'), label: t('Sources & Collection Jobs', '来源与采集任务'), kbd: 'G S', run: () => navigateAndClose('/sources') },
-            { group: t('Navigate', '页面跳转'), label: t('Automation & Rollup Ops', '全站监测与水合总控'), kbd: 'G M', run: () => navigateAndClose('/sources?tab=ops') },
+            { group: t('Navigate', '页面跳转'), label: t('Automation & Rollup Ops', '全站监测与水合总控'), kbd: 'G V', run: () => navigateAndClose('/sources?tab=ops') },
           ]
-        : [{ group: t('Navigate', '页面跳转'), label: t('My Collection Jobs', '我的采集任务'), kbd: 'G J', run: () => navigateAndClose('/projects?view=my-jobs') }]),
-      { group: t('Navigate', '页面跳转'), label: t('Saved Queries & Annotations', '个人工作区'), kbd: 'G W', run: () => navigateAndClose('/workspace') },
+        : []),
+      { group: t('Navigate', '页面跳转'), label: t('Bookmarks & Saved Queries', '收藏与查询'), kbd: 'G W', run: () => navigateAndClose('/workspace') },
       {
         group: t('Navigate', '页面跳转'),
         label: canWrite ? t('Account, Invites & Keys', '账户与机器密钥') : t('Account & Quota Policy', '账户与个人配额'),
@@ -479,6 +495,17 @@ export function WorkbenchShell({
         <nav className="rail-group" aria-label={t('Module switcher', '模块切换')}>
           <button
             type="button"
+            className={`rail-btn rail-domain ${activeDomain === 'reports' ? 'is-active' : ''}`}
+            onClick={() => navigateDomain('/reports')}
+            title={t('Report Workbench', '报告工作台')}
+            aria-label={t('Report Workbench', '报告')}
+            aria-current={activeDomain === 'reports' ? 'page' : undefined}
+          >
+            <FileText size={22} strokeWidth={1.75} aria-hidden="true" />
+            <span>{t('Reports', '报告')}</span>
+          </button>
+          <button
+            type="button"
             className={`rail-btn rail-domain ${activeDomain === 'feed' ? 'is-active' : ''}`}
             onClick={() => navigateDomain('/app/feed')}
             title={t('Information Feed', '资讯信息流')}
@@ -491,9 +518,9 @@ export function WorkbenchShell({
           <button
             type="button"
             className={`rail-btn rail-domain ${activeDomain === 'research' ? 'is-active' : ''}`}
-            onClick={() => navigateDomain(resolvedProject ? `/projects?projectId=${encodeURIComponent(resolvedProject.id)}` : '/projects')}
-            title={t('Research Workspace', '项目研究工作区')}
-            aria-label={t('Research Workspace', '项目研究')}
+            onClick={() => navigateDomain('/projects?view=list')}
+            title={t('Research Space', '研究空间')}
+            aria-label={t('Research Space', '研究')}
             aria-current={activeDomain === 'research' ? 'page' : undefined}
           >
             <FolderKanban size={22} strokeWidth={1.75} aria-hidden="true" />
@@ -502,8 +529,8 @@ export function WorkbenchShell({
           <button
             type="button"
             className={`rail-btn rail-domain ${activeDomain === 'explore' ? 'is-active' : ''}`}
-            onClick={() => navigateDomain(resolvedProject ? `/explore?projectId=${encodeURIComponent(resolvedProject.id)}` : '/explore')}
-            title={t('Explore', '探索')}
+            onClick={() => navigateDomain('/explore')}
+            title={t('Explore', '智能洞察探索')}
             aria-label={t('Explore', '探索')}
             aria-current={activeDomain === 'explore' ? 'page' : undefined}
           >
@@ -646,79 +673,85 @@ export function WorkbenchShell({
           </button>
 
           {/* Domain Context Header */}
-          {activeDomain === 'research' && actor ? (
-            <div className="side-context proj-switch-wrap" data-pop-root>
-              <div className="side-eyebrow">{t('Research Workspace', '项目研究')}</div>
-              <ProjectSwitcher projects={projects} selected={resolvedProject}
-                onCreate={() => navigateAndClose('/projects?new=1')}
-                onSelect={project => {
-                  onSelectProjectId(project.id);
-                  if (project.id === urlProjectId) return;
-                  const projectId = encodeURIComponent(project.id);
-                  if (route === '/content') {
-                    navigateAndClose('/content?projectId=' + projectId);
-                    return;
-                  }
-                  const requested = route === '/projects' ? currentView : '';
-                  const canKeepView = project.can_edit !== false &&
-                    (requested === 'jobs' || requested === 'overview' ||
-                      (project.dataset_mode === 'batch' && ['collect', 'batches'].includes(requested)));
-                  const view = canKeepView ? requested : 'overview';
-                  navigateAndClose('/projects?view=' + view + '&projectId=' + projectId);
-                }} />
-
-              <div className="proj-quick-bar">
-                <button
-                  type="button"
-                  className={`proj-quick-btn ${route === '/projects' && currentView === 'list' ? 'is-active' : ''}`}
-                  onClick={() => navigateAndClose('/projects?view=list')}
-                >
-                  <span>{t('All projects', '全部项目')} ({projects.length})</span>
-                </button>
-                <button
-                  type="button"
-                  className="proj-quick-btn proj-quick-btn--primary"
-                  onClick={() => navigateAndClose('/projects?new=1')}
-                >
-                  <Plus size={13} aria-hidden="true" />
-                  <span>{t('New project', '新建项目')}</span>
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="side-context side-context-head">
-              <div className="side-domain-title">
-                {activeDomain === 'explore'
+          <div className="side-context side-context-head">
+            <div className="side-domain-title">
+              {activeDomain === 'reports'
+                ? t('Report Workbench', '报告工作台')
+                : activeDomain === 'explore'
                   ? t('Explore', '探索')
                   : activeDomain === 'ops'
-                  ? t('Operations Admin', '运维管理')
-                  : activeDomain === 'settings'
-                    ? t('Account & Settings', '账户与设置')
-                    : activeDomain === 'assistant'
-                      ? t('SIFTLINE AI Assistant', 'SIFTLINE AI 助手')
-                      : activeDomain === 'research'
-                        ? t('Research Workspace', '项目研究')
-                        : t('Information Feed', '资讯信息流')}
-              </div>
-              <p className="side-domain-desc">
-                {activeDomain === 'explore'
-                  ? t('Multi-source keyword analytics & offline Reddit archives', '多源关键词洞察分析与离线归档检索')
-                  : activeDomain === 'ops'
-                  ? t('Manage collection sources, schedules & channel policies.', '管理采集来源、调度与渠道策略。')
-                  : activeDomain === 'settings'
-                    ? t('Manage account access, quotas & appearance.', '管理账户、权限和工作台外观。')
-                    : activeDomain === 'assistant'
-                      ? t('Reserved space for AI chat & research guidance.', '预留智能对话与研究协作空间。')
-                      : activeDomain === 'research'
-                        ? t('Sign in to manage research projects and sample analytics.', '登录后管理研究项目与样本分析。')
-                        : t('Browse curated stories, trending topics & daily digests.', '浏览精选内容、热门话题与每日简报。')}
-              </p>
+                    ? t('Operations Admin', '运维管理')
+                    : activeDomain === 'settings'
+                      ? t('Account & Settings', '账户与设置')
+                      : activeDomain === 'assistant'
+                        ? t('SIFTLINE AI Assistant', 'SIFTLINE AI 助手')
+                        : activeDomain === 'research'
+                          ? t('Research Space', '研究空间')
+                          : t('Information Feed', '资讯信息流')}
             </div>
-          )}
+            <p className="side-domain-desc">
+              {activeDomain === 'reports'
+                ? t('Turn research goals into verified, evidence-backed reports.', '围绕研究目标自动发现资料、完成统计分析并交付证据报告。')
+                : activeDomain === 'explore'
+                  ? t('Multi-source keyword analytics & historical Reddit archives.', '自由分析历史归档与站内讨论，也可带着研究范围深入钻取。')
+                  : activeDomain === 'ops'
+                    ? t('Manage collection sources, schedules & channel policies.', '管理采集来源、调度与渠道策略。')
+                    : activeDomain === 'settings'
+                      ? t('Manage account access, quotas & appearance.', '管理账户、权限和工作台外观。')
+                      : activeDomain === 'assistant'
+                        ? t('Reserved space for AI chat & research guidance.', '预留智能对话与研究协作空间。')
+                        : activeDomain === 'research'
+                          ? t('Manage studies, reusable materials, bookmarks & task history.', '集中管理全部研究、可用资料、收藏查询与任务记录。')
+                          : t('Browse curated stories, trending topics & daily digests.', '浏览精选资讯、热门话题、社媒动态与每日简报。')}
+            </p>
+            {activeDomain === 'research' && actor && (
+              <div style={{ marginTop: 8 }}>
+                <button
+                  type="button"
+                  className="ds-btn ds-btn--brand"
+                  style={{ width: '100%', justifyContent: 'center', height: 32, fontSize: 12 }}
+                  onClick={() => navigateAndClose('/projects?new=1')}
+                >
+                  <Plus size={14} aria-hidden="true" />
+                  <span>{t('New Research Study', '新建研究')}</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Domain-Scoped Secondary Navigation */}
         <nav className="side-nav" aria-label={t('Primary navigation', '工作台导航')}>
+          {activeDomain === 'reports' && (
+            <div className="nav-group">
+              <p className="nav-label">{t('Reports', '研究报告')}</p>
+              <button
+                type="button"
+                className={`nav-item ${route === '/reports' && window.location.pathname === '/reports' && currentView !== 'list' ? 'is-active' : ''}`}
+                onClick={() => navigateAndClose('/reports')}
+              >
+                <Sparkles size={17} className="nav-ic" aria-hidden="true" />
+                <span>{t('Report Workbench', '报告工作台')}</span>
+              </button>
+              <button
+                type="button"
+                className={`nav-item ${window.location.pathname === '/reports/new' ? 'is-active' : ''}`}
+                onClick={() => navigateAndClose('/reports/new')}
+              >
+                <Plus size={17} className="nav-ic" aria-hidden="true" />
+                <span>{t('Create Report', '创建报告')}</span>
+              </button>
+              <button
+                type="button"
+                className={`nav-item ${route === '/reports' && currentView === 'list' ? 'is-active' : ''}`}
+                onClick={() => navigateAndClose('/reports?view=list')}
+              >
+                <FileText size={17} className="nav-ic" aria-hidden="true" />
+                <span>{t('My Reports', '我的报告')}</span>
+              </button>
+            </div>
+          )}
+
           {activeDomain === 'explore' && (
             <div className="nav-group">
               <p className="nav-label">{t('Explore Modules', '探索模块')}</p>
@@ -726,7 +759,7 @@ export function WorkbenchShell({
                 type="button"
                 className="nav-item is-active"
                 aria-current="page"
-                onClick={() => navigateAndClose(resolvedProject ? `/explore?projectId=${encodeURIComponent(resolvedProject.id)}` : '/explore')}
+                onClick={() => navigateAndClose('/explore')}
               >
                 <Sparkles size={17} className="nav-ic" aria-hidden="true" />
                 <span>{t('Insights Explore', '智能洞察探索')}</span>
@@ -771,7 +804,19 @@ export function WorkbenchShell({
                   onClick={() => navigateAndClose('/app/feed?scope=info&view=stream')}
                 >
                   <Sparkles size={17} className="nav-ic" aria-hidden="true" />
-                  <span>{t('Info Discovery Stream', '资讯探索流')}</span>
+                  <span>{t('Info For You', '资讯推荐流')}</span>
+                </button>
+              </div>
+
+              <div className="nav-group">
+                <p className="nav-label">{t('Topic Intelligence', '专题情报')}</p>
+                <button
+                  type="button"
+                  className="nav-item"
+                  onClick={() => navigateAndClose('/ai')}
+                >
+                  <Sparkles size={17} className="nav-ic" aria-hidden="true" />
+                  <span>{t('AI Release Intelligence', 'AI 发布情报')}</span>
                 </button>
               </div>
 
@@ -811,72 +856,84 @@ export function WorkbenchShell({
           {activeDomain === 'research' && (
             <>
               <div className="nav-group">
-                <p className="nav-label">{t('Data Collection', '数据采集')}</p>
+                <p className="nav-label">{t('Research Space', '研究空间')}</p>
                 <button
                   type="button"
-                  className={`nav-item ${route === '/projects' && currentView === 'collect' ? 'is-active' : ''}`}
-                  aria-current={route === '/projects' && currentView === 'collect' ? 'page' : undefined}
-                  onClick={() => navigateAndClose(`/projects?view=collect${pidQs}`)}
+                  className={`nav-item ${route === '/projects' && (!currentView || currentView === 'list') && !urlProjectId ? 'is-active' : ''}`}
+                  onClick={() => navigateAndClose('/projects?view=list')}
                 >
-                  <Database size={17} className="nav-ic" aria-hidden="true" />
-                  <span>{t('Data Ingestion', '数据接入')}</span>
+                  <FolderKanban size={17} className="nav-ic" aria-hidden="true" />
+                  <span>{t('All Studies', '全部研究')}</span>
+                  {projects.length > 0 && <em className="ni-count">{projects.length}</em>}
                 </button>
                 <button
                   type="button"
-                  className={`nav-item ${route === '/projects' && currentView === 'jobs' ? 'is-active' : ''}`}
-                  aria-current={route === '/projects' && currentView === 'jobs' ? 'page' : undefined}
-                  onClick={() => navigateAndClose(`/projects?view=jobs${pidQs}`)}
-                >
-                  <RefreshCw size={17} className="nav-ic" aria-hidden="true" />
-                  <span>{t('Collection Jobs', '采集任务')}</span>
-                </button>
-                <button
-                  type="button"
-                  className={`nav-item ${route === '/projects' && currentView === 'batches' ? 'is-active' : ''}`}
-                  aria-current={route === '/projects' && currentView === 'batches' ? 'page' : undefined}
-                  onClick={() => navigateAndClose(`/projects?view=batches${pidQs}`)}
+                  className={`nav-item ${route === '/projects' && currentView === 'resources' ? 'is-active' : ''}`}
+                  onClick={() => navigateAndClose('/projects?view=resources')}
                 >
                   <Layers size={17} className="nav-ic" aria-hidden="true" />
-                  <span>{t('Data Batches', '数据批次')}</span>
-                  {resolvedProject && (resolvedProject.enabled_batch_count ?? 0) > 0 && (
-                    <em className="ni-count">{resolvedProject.enabled_batch_count}</em>
-                  )}
-                </button>
-              </div>
-
-              <div className="nav-group">
-                <p className="nav-label">{t('Research & Analysis', '研究分析')}</p>
-                <button
-                  type="button"
-                  className={`nav-item ${route === '/projects' && (!currentView || currentView === 'overview') ? 'is-active' : ''}`}
-                  aria-current={route === '/projects' && (!currentView || currentView === 'overview') ? 'page' : undefined}
-                  onClick={() => navigateAndClose(`/projects?view=overview${pidQs}`)}
-                >
-                  <Grid size={17} className="nav-ic" aria-hidden="true" />
-                  <span>{t('Content Research', '内容研究')}</span>
-                </button>
-                <button
-                  type="button"
-                  className={`nav-item ${route === '/content' ? 'is-active' : ''}`}
-                  aria-current={route === '/content' ? 'page' : undefined}
-                  onClick={() => navigateAndClose(`/content${pidQueryOnly}`)}
-                >
-                  <Search size={17} className="nav-ic" aria-hidden="true" />
-                  <span>{t('Content Search', '内容检索')}</span>
+                  <span>{t('Available Materials', '可用资料')}</span>
                 </button>
                 <button
                   type="button"
                   className={`nav-item ${route === '/workspace' ? 'is-active' : ''}`}
-                  aria-current={route === '/workspace' ? 'page' : undefined}
                   onClick={() => navigateAndClose('/workspace')}
                 >
                   <Bookmark size={17} className="nav-ic" aria-hidden="true" />
-                  <span>{t('My Research', '我的研究')}</span>
+                  <span>{t('Bookmarks & Queries', '收藏与查询')}</span>
                   {annotations.length + savedQueries.length > 0 && (
                     <em className="ni-count">{annotations.length + savedQueries.length}</em>
                   )}
                 </button>
+                <button
+                  type="button"
+                  className={`nav-item ${route === '/projects' && currentView === 'my-jobs' ? 'is-active' : ''}`}
+                  onClick={() => navigateAndClose('/projects?view=my-jobs')}
+                >
+                  <Clock size={17} className="nav-ic" aria-hidden="true" />
+                  <span>{t('Task Records', '任务记录')}</span>
+                  {activeRunCount > 0 && <em className="ni-count">{activeRunCount}</em>}
+                </button>
               </div>
+
+              {projects.length > 0 && (
+                <div className="nav-group">
+                  <button
+                    type="button"
+                    className="nav-label"
+                    onClick={() => setRecentOpen((v) => !v)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      width: '100%',
+                      border: 0,
+                      background: 'none',
+                      cursor: 'pointer',
+                      paddingRight: 4,
+                    }}
+                    aria-expanded={recentOpen}
+                  >
+                    <span>{t('Recent Studies', '最近研究')}</span>
+                    {recentOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  </button>
+                  {recentOpen &&
+                    projects.slice(0, 6).map((p) => {
+                      const isCurrent = route === '/projects' && urlProjectId === p.id;
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          className={`nav-item ${isCurrent ? 'is-active' : ''}`}
+                          onClick={() => navigateAndClose(`/projects?view=summary&projectId=${encodeURIComponent(p.id)}`)}
+                          title={p.name}
+                        >
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                        </button>
+                      );
+                    })}
+                </div>
+              )}
             </>
           )}
 
@@ -1101,7 +1158,7 @@ export function WorkbenchShell({
                 type="button"
                 className="ds-btn"
                 style={{ width: '100%', justifyContent: 'center' }}
-                onClick={() => onOpenAuth('login', undefined, '/projects')}
+                onClick={() => onOpenAuth('login', undefined, '/reports')}
               >
                 <LogIn size={14} />
                 <span>{t('Sign in to Workbench', '登录进入工作台')}</span>
@@ -1111,7 +1168,7 @@ export function WorkbenchShell({
                   type="button"
                   className="ds-btn ds-btn--ghost"
                   style={{ width: '100%', justifyContent: 'center' }}
-                  onClick={() => onOpenAuth('register', undefined, '/projects')}
+                  onClick={() => onOpenAuth('register', undefined, '/reports')}
                 >
                   <span>{t('Create Account', '注册账号')}</span>
                 </button>
@@ -1144,7 +1201,7 @@ export function WorkbenchShell({
                 setQuickTerm(e.target.value);
                 setQuickErr(null);
               }}
-              placeholder={t('Search discussions, projects or press Ctrl+K...', '搜索讨论、项目或按 Ctrl+K 快速跳转…')}
+              placeholder={t('Search original posts or press Ctrl+K…', '搜索原文…')}
               aria-label={t('Global search', '全局搜索')}
             />
             <span className="gs-hint">
@@ -1201,12 +1258,12 @@ export function WorkbenchShell({
 
             {actor ? (
               <>
-                {/* Live Session Status Pill */}
+                {/* Session Status Pill */}
                 <button
                   type="button"
                   className="top-pill-btn top-desktop-button"
                   onClick={() => navigateAndClose('/settings')}
-                  title={t('Live /api/v1 Cookie Session & RBAC Role', '当前在线 /api/v1 同源会话与权限角色')}
+                  title={t('Active workspace account & role', '当前已登录账户与权限角色')}
                 >
                   <span
                     style={{
@@ -1216,7 +1273,7 @@ export function WorkbenchShell({
                       background: 'var(--wb-teal)',
                     }}
                   />
-                  <span>Live · {actor.role}</span>
+                  <span>{roleLabel}</span>
                 </button>
 
                 {/* + New Quick Create */}
@@ -1234,9 +1291,14 @@ export function WorkbenchShell({
                   {openPop === 'create' && (
                     <div className="ds-pop" style={{ top: 'calc(100% + 6px)', right: 0, width: 220 }}>
                       <div className="pop-hd"><span>{t('Quick Create', '新建')}</span></div>
+                      <button type="button" className="pop-opt" onClick={() => navigateAndClose('/reports/new')}>
+                        <FileText size={13} />
+                        <span style={{ flex: 1 }}>{t('Create Report', '创建报告')}</span>
+                        <span className="kbd">R</span>
+                      </button>
                       <button type="button" className="pop-opt" onClick={() => navigateAndClose('/projects?new=1')}>
                         <FolderKanban size={13} />
-                        <span style={{ flex: 1 }}>{t('Monitoring Project', '监测项目')}</span>
+                        <span style={{ flex: 1 }}>{t('New Study', '新建研究')}</span>
                         <span className="kbd">P</span>
                       </button>
                       {canWrite && (
@@ -1306,7 +1368,7 @@ export function WorkbenchShell({
                 type="button"
                 className="ds-btn ds-btn--brand"
                 style={{ height: 33, padding: '0 14px', fontSize: 12 }}
-                onClick={() => onOpenAuth('login', undefined, '/projects')}
+                onClick={() => onOpenAuth('login', undefined, '/reports')}
               >
                 <LogIn size={14} />
                 <span>{t('Sign in', '登录')}</span>

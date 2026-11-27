@@ -497,6 +497,11 @@ def analyze_archive_scope(
         "matchedPosts": len(selection.posts),
         "matchedComments": len(selection.comments),
         "isTruncated": is_sampled,
+        "timeRange": {
+            "from": selection.stats.get("earliestDay"),
+            "to": selection.stats.get("latestDay"),
+            "activeDays": int(selection.stats.get("activeDays") or len(retrieval_by_day)),
+        },
         "elapsedMs": round((time.perf_counter() - t0) * 1000),
         "panels": panels,
     }

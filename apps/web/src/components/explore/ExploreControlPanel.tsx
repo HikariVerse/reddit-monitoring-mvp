@@ -71,6 +71,9 @@ export interface ExploreControlPanelProps {
   onGroupByChange: (val: ExploreGroupBy) => void;
   profile: ExploreProfile;
   onProfileChange: (val: ExploreProfile) => void;
+  includeComments?: boolean;
+  onIncludeCommentsChange?: (val: boolean) => void;
+  scopeLocked?: boolean;
   sampleLimitText: string;
   onSampleLimitChange: (val: string) => void;
   onSampleLimitBlur: () => void;
@@ -104,6 +107,9 @@ export function ExploreControlPanel({
   onGroupByChange,
   profile,
   onProfileChange,
+  includeComments = false,
+  onIncludeCommentsChange,
+  scopeLocked = false,
   sampleLimitText,
   onSampleLimitChange,
   onSampleLimitBlur,
@@ -316,7 +322,7 @@ export function ExploreControlPanel({
                 <button
                   key={opt.mode}
                   type="button"
-                  disabled={avail.disabled}
+                  disabled={avail.disabled || scopeLocked}
                   onClick={() => onSourceModeChange(opt.mode)}
                   className={`explore-source-card ${active ? 'is-active' : ''}`}
                 >
@@ -354,8 +360,8 @@ export function ExploreControlPanel({
                 </div>
               </div>
               <div className="explore-project-bar-control">
-                <Select value={projectId} onChange={(e) => onProjectIdChange(e.target.value)}>
-                  <option value="">{t('Select a project…', '请选择研究项目…')}</option>
+                <Select value={projectId} disabled={scopeLocked} onChange={(e) => onProjectIdChange(e.target.value)}>
+                  <option value="">{t('Select a study…', '请选择研究项目…')}</option>
                   {projects.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
@@ -429,6 +435,18 @@ export function ExploreControlPanel({
                       onChange={(e) => onSubredditsChange(e.target.value)}
                       placeholder="LocalLLaMA, programming, duckdb"
                     />
+                  </label>
+                )}
+                {sourceMode === 'archive' && onIncludeCommentsChange && (
+                  <label className="explore-filter-field" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', paddingTop: 18 }}>
+                    <input
+                      type="checkbox"
+                      checked={includeComments}
+                      onChange={(e) => onIncludeCommentsChange(e.target.checked)}
+                    />
+                    <span className="explore-filter-label" style={{ margin: 0 }}>
+                      {t('Include historical comments (deeper user voice)', '包含历史评论（更深入的用户原声与痛点）')}
+                    </span>
                   </label>
                 )}
               </div>

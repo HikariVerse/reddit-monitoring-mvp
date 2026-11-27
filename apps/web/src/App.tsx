@@ -44,12 +44,16 @@ const AiReviewQueuePage = lazy(() =>
 const AssistantPage = lazy(() =>
   import('./pages/AssistantPage').then((m) => ({ default: m.AssistantPage })),
 );
+const ReportsPage = lazy(() =>
+  import('./pages/ReportsPage').then((m) => ({ default: m.ReportsPage })),
+);
 
 type AppRoute = PublicRoute | '/guide' | WorkbenchRoute;
 
 const PUBLIC_ROUTES: PublicRoute[] = ['/', '/product', '/ai', '/docs'];
 
 const WORKBENCH_ROUTES: WorkbenchRoute[] = [
+  '/reports',
   '/app/feed',
   '/explore',
   '/projects',
@@ -62,6 +66,7 @@ const WORKBENCH_ROUTES: WorkbenchRoute[] = [
 ];
 
 const AUTH_REQUIRED_ROUTES: WorkbenchRoute[] = [
+  '/reports',
   '/explore',
   '/projects',
   '/sources',
@@ -95,6 +100,8 @@ function parseLocation(): { pathname: AppRoute; rawPathname: string; search: str
   let pathname: AppRoute = '__not_found__';
   if (rawPathname === '/guide') {
     pathname = '/guide';
+  } else if (rawPathname === '/reports' || rawPathname.startsWith('/reports/')) {
+    pathname = '/reports';
   } else if (PUBLIC_ROUTES.includes(rawPathname as PublicRoute)) {
     pathname = rawPathname as PublicRoute;
   } else if (WORKBENCH_ROUTES.includes(rawPathname as WorkbenchRoute)) {
@@ -229,11 +236,11 @@ export function App() {
   }, [authModal.pendingTarget, currentFullPath]);
 
   const handleEnterWorkbench = useCallback(
-    (targetPath = '/projects') => {
+    (targetPath = '/reports') => {
       if (!actor) {
         openAuth(
           'login',
-          t('Sign in to enter the monitoring workbench.', '请登录以进入监测工作台。'),
+          t('Sign in to enter the research workbench.', '请登录以进入研究与报告工作台。'),
           targetPath,
         );
         return;
@@ -388,7 +395,7 @@ export function App() {
               <GuidePage
                 isAuthenticated={Boolean(actor)}
                 onNavigate={navigate}
-                onOpenAuth={() => openAuth('login', undefined, '/projects')}
+                onOpenAuth={() => openAuth('login', undefined, '/reports')}
               />
             </Suspense>
             {authOverlay}
@@ -431,7 +438,7 @@ function isPublicSitePath(pathname: string): boolean {
                   <Homepage
                     embedded
                     isAuthenticated={Boolean(actor)}
-                    onOpenAuth={(tab = 'login') => openAuth(tab, undefined, '/projects')}
+                    onOpenAuth={(tab = 'login') => openAuth(tab, undefined, '/reports')}
                     onEnterWorkbench={handleEnterWorkbench}
                     onGoFeed={() => navigate('/app/feed')}
                   />
@@ -575,6 +582,10 @@ function isPublicSitePath(pathname: string): boolean {
                     </div>
                   </div>
                 </div>
+              )}
+
+              {workbenchRoute === '/reports' && actor && (
+                <ReportsPage rawPathname={loc.rawPathname} search={loc.search} onNavigate={navigate} />
               )}
 
               {workbenchRoute === '/explore' && actor && <ExplorePage search={loc.search} onNavigate={navigate} />}

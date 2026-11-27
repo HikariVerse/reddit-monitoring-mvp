@@ -91,7 +91,18 @@ export function GlobalSocialBudgetCard({ isAdmin }: { isAdmin: boolean }) {
             </div>
             <div>
               <dt>{t('Reserved Today (UTC)', '今日已预留')}</dt>
-              <dd><strong>{number.format(data.reservedToday)}</strong> {t('items', '条')}</dd>
+              <dd>
+                <strong>
+                  {number.format(
+                    typeof data.socialResourcesToday === 'number' && Number.isFinite(data.socialResourcesToday)
+                      ? data.socialResourcesToday
+                      : Number.isFinite(data.reservedToday)
+                        ? data.reservedToday
+                        : 0,
+                  )}
+                </strong>{' '}
+                {t('items', '条')}
+              </dd>
             </div>
             <div>
               <dt>{t('Auto Hydration', '自动评论补充')}</dt>
@@ -109,12 +120,12 @@ export function GlobalSocialBudgetCard({ isAdmin }: { isAdmin: boolean }) {
           >
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
               <label className="wb-field">
-                {t('Daily social item ceiling (0..5,000,000)', '每日社媒总上限（0..5,000,000）')}
+                {t('Daily social item ceiling (0..1,000,000)', '每日社媒总上限（0..1,000,000）')}
                 <input
                   type="number"
                   className="wb-input"
                   min={0}
-                  max={5000000}
+                  max={1000000}
                   required
                   value={ceiling}
                   onChange={(e) => setCeiling(e.target.valueAsNumber || 0)}

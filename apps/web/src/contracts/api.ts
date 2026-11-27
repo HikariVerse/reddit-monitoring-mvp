@@ -428,6 +428,7 @@ export interface GlobalSocialBudgetDto {
   dailySocialItemCeiling: number;
   autoHydrationEnabled: boolean;
   reservedToday: number;
+  socialResourcesToday?: number;
   revision: number;
   updatedAt: string;
 }
@@ -565,6 +566,8 @@ export interface Project {
   id: string;
   name: string;
   description?: string | null;
+  origin_kind?: 'manual' | 'quick_research' | 'tracking';
+  research_goal?: string | null;
   dataset_mode?: 'source_filter' | 'batch';
   visibility?: 'private' | 'shared';
   forked_from_project_id?: string | null;

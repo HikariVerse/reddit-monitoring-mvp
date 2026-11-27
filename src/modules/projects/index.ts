@@ -1,6 +1,6 @@
 export { projectRoutes, projectRoutes as registerProjectsModule } from "./routes";
-export { assertProjectWritable, listProjectBatchIds, projectSources, resolveProjectScope } from "./sql";
-export { attachBatchToProjectInTx, removeBatchFromAllProjectsInTx } from "./batches";
+export { assertProjectWritable, listProjectBatchIds, listProjects, projectSources, resolveProjectScope, writeProject } from "./sql";
+export { attachBatchToProject, attachBatchToProjectInTx, listProjectBatches, removeBatchFromAllProjectsInTx } from "./batches";
 export {
   buildScopedSql,
   deriveTargetIdentity,

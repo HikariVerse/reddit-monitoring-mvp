@@ -7,7 +7,8 @@ export {
   packXAccountBatches,
 } from "./metrics";
 export { refreshMonitorRollups, refreshRollupsForSource } from "./rollups";
-export { authorizeScheduledSourceDispatch } from "./sql";
+export { getMonitorOverview, listMonitorPosts } from "./analytics";
+export { authorizeScheduledSourceDispatch, listMonitors } from "./sql";
 export { intelligenceRoutes, intelligenceRoutes as registerIntelligenceModule } from "./routes";
 export { hydrateHotCommunityPost } from "./community-hydration";
 export { runL2ResearchComparison, clearL2ResearchCacheForTests } from "./research-l2";

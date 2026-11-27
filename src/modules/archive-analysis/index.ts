@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import type { TypeBoxTypeProvider } from "@fastify/type-provider-typebox";
+import { Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import type { Pool, PoolClient } from "pg";
 import type { Actor } from "../../../packages/contracts/src/access";
@@ -10,11 +11,73 @@ import {
 } from "../../../packages/contracts/src/archive";
 import { REDDIT_ARCHIVE_SOURCE_TAG } from "../../../packages/contracts/src/collection";
 import { ParamsId } from "../../../packages/contracts/src/common";
+import type { ExploreAnalyzeRequest, ExploreAnalyzeResponse, ExploreEvidenceRequest, ExploreEvidenceResponse } from "../../../packages/contracts/src/explore";
 import { fail, AppError } from "../../shared/errors";
 import { transaction } from "../../storage/db";
 import { loadEffectivePolicyForUser } from "../collection/index";
 import { assertProjectWritable, projectSources } from "../projects/index";
-import { registerExploreRoutes } from "./explore-routes";
+import {
+  executeExploreAnalysis,
+  executeExploreEvidence,
+  registerExploreRoutes,
+  type ExploreArchiveBridge,
+  type ExploreStudyStore,
+} from "./explore-routes";
+
+export type { ExploreStudyStore };
+
+export interface ArchiveFastDiscoveryRequest {
+  query: string;
+  months?: string[];
+  subreddits?: string[];
+  from?: string | null;
+  to?: string | null;
+  verifyExact?: boolean;
+  includeSamples?: boolean;
+  sampleLimit?: number;
+  includeCommentsCount?: boolean;
+}
+
+export interface ArchiveFastDiscoveryResult {
+  status: "exact" | "candidate";
+  version: string;
+  months: string[];
+  query: string;
+  ftsCandidates: number;
+  matchedThreads: number;
+  associatedComments: number;
+  reportedCommentsSum: number;
+  needsExactVerify: boolean;
+  dateRange: { earliest: string | null; latest: string | null; activeDays: number };
+  byMonth: Array<{ month: string; count: number }>;
+  topCommunities: Array<{ community: string; count: number }>;
+  samples: Array<{
+    month: string;
+    docId: number;
+    community: string;
+    createdUtc: number | null;
+    score: number;
+    reportedComments: number;
+    title: string;
+    snippet: string;
+  }>;
+  elapsedMs: number;
+}
+
+const ArchiveDiscoverBody = Type.Object(
+  {
+    query: Type.String({ maxLength: 256 }),
+    months: Type.Optional(Type.Array(Type.String({ pattern: "^[0-9]{4}-(?:0[1-9]|1[0-2])$" }), { maxItems: 120 })),
+    subreddits: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 64 }), { maxItems: 32 })),
+    from: Type.Optional(Type.Union([Type.String({ maxLength: 35 }), Type.Null()])),
+    to: Type.Optional(Type.Union([Type.String({ maxLength: 35 }), Type.Null()])),
+    verifyExact: Type.Optional(Type.Boolean()),
+    includeSamples: Type.Optional(Type.Boolean()),
+    sampleLimit: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+    includeCommentsCount: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
 
 const EmptyFilters = { query: "", subreddits: [], from: null, to: null };
 const publicErrors: Record<string, number> = {
@@ -125,7 +188,60 @@ function selectionOf(ref: ArchiveReference): ArchiveSelection {
   return { archiveId: ref.archiveId, version: ref.version, scope: ref.scope };
 }
 
-export async function registerArchiveAnalysisModule(app: FastifyInstance, pool: Pool) {
+async function callArchiveDiscover(
+  config: ArchiveConfig,
+  operation: "discover" | "discover/verify",
+  data: ArchiveFastDiscoveryRequest,
+): Promise<ArchiveFastDiscoveryResult> {
+  if (!config.enabled) fail(503, "archive_disabled");
+  if (!config.url || !config.token) fail(503, "archive_unconfigured");
+  const timeout = operation === "discover/verify" ? Math.max(config.timeoutMs, 45_000) : Math.max(config.timeoutMs, 15_000);
+  const signal = AbortSignal.timeout(timeout);
+  try {
+    const response = await fetch(new URL(operation, config.url), {
+      method: "POST",
+      redirect: "error",
+      signal,
+      headers: { authorization: "Bearer " + config.token, "content-type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    const result = (await response.json()) as ArchiveFastDiscoveryResult & { code?: string };
+    if (!response.ok) {
+      const code = result?.code ?? "";
+      if (Object.hasOwn(publicErrors, code)) fail(publicErrors[code], code);
+      fail(503, "archive_invalid_response");
+    }
+    return result;
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    if (signal.aborted) fail(503, "query_timeout");
+    fail(503, "archive_offline");
+  }
+}
+
+export interface ArchiveRuntimeFacade {
+  checkStatus: (actor: Actor) => Promise<{
+    available: boolean;
+    state: string;
+    months: string[];
+    version?: string;
+    sourceId?: string;
+  }>;
+  discover: (actor: Actor, req: ArchiveFastDiscoveryRequest, verifyExact?: boolean) => Promise<ArchiveFastDiscoveryResult>;
+  ensureProjectArchiveRef: (
+    actor: Actor,
+    projectId: string,
+    selection: ArchiveSelection,
+  ) => Promise<ArchiveReference>;
+  runExplore: (actor: Actor, req: ExploreAnalyzeRequest) => Promise<ExploreAnalyzeResponse>;
+  resolveEvidence: (actor: Actor, req: ExploreEvidenceRequest) => Promise<ExploreEvidenceResponse>;
+}
+
+export async function registerArchiveAnalysisModule(
+  app: FastifyInstance,
+  pool: Pool,
+  options?: { studyStore?: ExploreStudyStore },
+): Promise<ArchiveRuntimeFacade> {
   const api = app.withTypeProvider<TypeBoxTypeProvider>();
   const config = readConfig();
   let checkingCatalog: Promise<ArchiveCatalog> | undefined;
@@ -151,6 +267,51 @@ export async function registerArchiveAnalysisModule(app: FastifyInstance, pool: 
     if (!rows[0]) fail(404, "archive_reference_not_found");
     return rows[0];
   }
+
+  async function ensureProjectArchiveRef(
+    actor: Actor,
+    projectId: string,
+    rawSelection: ArchiveSelection,
+  ): Promise<ArchiveReference> {
+    await assertProjectWritable(pool, actor, projectId);
+    const source = await requireSource(pool, actor);
+    const selection = normalize(rawSelection);
+    const scopeHash = createHash("sha256").update(JSON.stringify(selection.scope)).digest("hex");
+    return transaction(pool, async (client) => {
+      await client.query("SELECT id FROM monitor_project WHERE id=$1 FOR UPDATE", [projectId]);
+      await assertProjectWritable(client, actor, projectId);
+      await requireSource(client, actor);
+      await client.query(
+        `INSERT INTO monitor_project_archive (id, project_id, source_id, archive_id, version, scope, scope_hash, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (project_id,source_id,archive_id,version,scope_hash) DO NOTHING`,
+        [randomUUID(), projectId, source.id, selection.archiveId, selection.version, selection.scope, scopeHash, actor.userId],
+      );
+      const { rows } = await client.query<ArchiveReference>(
+        `SELECT ${References} FROM monitor_project_archive a
+         WHERE a.project_id=$1 AND a.source_id=$2 AND a.archive_id=$3 AND a.version=$4 AND a.scope_hash=$5`,
+        [projectId, source.id, selection.archiveId, selection.version, scopeHash],
+      );
+      return rows[0];
+    });
+  }
+
+  // Project-free authorized R4 fast discovery endpoints
+  api.post(
+    "/v1/archive/discover",
+    { config: read, schema: { body: ArchiveDiscoverBody } },
+    async (request) => {
+      await requireSource(pool, request.actor!);
+      return callArchiveDiscover(config, "discover", request.body);
+    },
+  );
+  api.post(
+    "/v1/archive/discover/verify",
+    { config: read, schema: { body: ArchiveDiscoverBody } },
+    async (request) => {
+      await requireSource(pool, request.actor!);
+      return callArchiveDiscover(config, "discover/verify", { ...request.body, verifyExact: true });
+    },
+  );
 
   api.get(base + "/status", { config: read, schema: { params: ParamsId, response: { 200: ArchiveStatus } } }, async request => {
     const actor = request.actor!;
@@ -236,11 +397,12 @@ export async function registerArchiveAnalysisModule(app: FastifyInstance, pool: 
     return callArchive<ArchiveThread>(config, "evidence", { ...request.body, ...selectionOf(ref), reference: ref.id });
   });
 
-  registerExploreRoutes(app, pool, {
+  const bridge: ExploreArchiveBridge = {
     enabled: config.enabled,
     url: config.url,
     token: config.token,
     timeoutMs: config.timeoutMs,
+    studyStore: options?.studyStore,
     checkArchiveStatus: async (db, actor) => {
       try {
         const source = await requireSource(db, actor);
@@ -261,5 +423,18 @@ export async function registerArchiveAnalysisModule(app: FastifyInstance, pool: 
       }
     },
     getProjectArchiveRef: async (actor, projectId, refId) => reference(actor, projectId, refId),
-  });
+  };
+
+  registerExploreRoutes(app, pool, bridge);
+
+  return {
+    checkStatus: (actor) => bridge.checkArchiveStatus(pool, actor),
+    discover: async (actor, req, verifyExact = false) => {
+      await requireSource(pool, actor);
+      return callArchiveDiscover(config, verifyExact ? "discover/verify" : "discover", { ...req, verifyExact });
+    },
+    ensureProjectArchiveRef,
+    runExplore: (actor, req) => executeExploreAnalysis(pool, bridge, actor, req),
+    resolveEvidence: (actor, req) => executeExploreEvidence(bridge, actor, req),
+  };
 }

@@ -32,6 +32,8 @@ export interface Project {
   description: string | null;
   dataset_mode: "source_filter" | "batch";
   visibility: "private" | "shared";
+  origin_kind?: "manual" | "quick_research" | "tracking";
+  research_goal?: string | null;
   owner_user_id: string | null;
   forked_from_project_id: string | null;
   linked_monitor_id: string | null;
@@ -51,7 +53,7 @@ export async function listProjects(pool: Pool | PoolClient, actor: Actor, id?: s
   const isViewer = actor.role === "viewer";
   const restrictBatches = isViewer || actor.allowedSourceIds !== null;
   const { rows } = await pool.query<Project & { batch_ids: string[]; enabled_batch_ids: string[] }>(`
-    SELECT p.id, p.name, p.description, p.dataset_mode, p.visibility, p.owner_user_id,
+    SELECT p.id, p.name, p.description, p.dataset_mode, p.visibility, p.origin_kind, p.research_goal, p.owner_user_id,
       p.forked_from_project_id, p.linked_monitor_id, p.filter,
       p.revision, p.thread_aware, p.include_push_in_trends, p.created_at, p.updated_at,
       s.source_ids,
@@ -173,7 +175,12 @@ function resolveNewProjectParams(actor: Actor, input: ProjectWrite, sources: str
   return { mode, visibility };
 }
 
-export async function writeProject(pool: Pool, actor: Actor, input: ProjectWrite, update?: { id: string; revision: number }) {
+export async function writeProject(
+  pool: Pool,
+  actor: Actor,
+  input: ProjectWrite & { originKind?: "manual" | "quick_research" | "tracking"; researchGoal?: string | null },
+  update?: { id: string; revision: number },
+) {
   const sources = [...new Set(input.sourceIds ?? [])];
   if (actor.allowedSourceIds !== null && !sources.every((id) => actor.allowedSourceIds!.includes(id)))
     fail(404, "Source not found");
@@ -217,14 +224,16 @@ export async function writeProject(pool: Pool, actor: Actor, input: ProjectWrite
       const { mode, visibility } = resolveNewProjectParams(actor, input, sources);
       await assertViewerProjectQuota(client, actor);
       await client.query(`
-        INSERT INTO monitor_project(id,name,description,dataset_mode,visibility,filter,thread_aware,include_push_in_trends,owner_user_id)
-        VALUES($1,$2,$3,$4,$5,$6,COALESCE($7,TRUE),COALESCE($8,FALSE),$9)`,
+        INSERT INTO monitor_project(id,name,description,dataset_mode,visibility,origin_kind,research_goal,filter,thread_aware,include_push_in_trends,owner_user_id)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,TRUE),COALESCE($10,FALSE),$11)`,
         [
           id,
           input.name,
           input.description ?? null,
           mode,
           visibility,
+          input.originKind ?? "manual",
+          input.researchGoal ?? null,
           filter,
           input.threadAware ?? null,
           input.includePushInTrends ?? null,

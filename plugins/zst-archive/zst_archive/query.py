@@ -863,10 +863,287 @@ def select_archive_for_analysis(
                 "matchedPosts": len(posts),
                 "matchedComments": len(comments),
                 "retrievalByDay": retrieval_by_day,
+                "earliestDay": daily_counts[0][0] if daily_counts else None,
+                "latestDay": daily_counts[-1][0] if daily_counts else None,
+                "activeDays": len(daily_counts),
                 "months": [p.month for p in packages],
                 "sampled": total_matched > len(posts),
             },
         )
+    finally:
+        con.close()
+
+
+def discover_archive_fast(
+    packages: list[MonthPackage],
+    *,
+    version: str,
+    query: str = "",
+    subreddits: tuple[str, ...] = (),
+    from_iso: str | None = None,
+    to_iso: str | None = None,
+    verify_exact: bool = False,
+    include_samples: bool = True,
+    sample_limit: int = 5,
+    include_comments_count: bool = True,
+    config: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Fast scalar-only R4 discovery (FTS5 recall + Parquet scalar aggregation).
+
+    Separates fast candidate discovery from expensive exact phrase/body verification so
+    discovery endpoints respond in sub-second to low-second latency without reading full text.
+    """
+    t0 = time.perf_counter()
+    if not packages:
+        raise ValueError("No open-corpus-v1 packages found")
+
+    normalized_subs = tuple(dict.fromkeys(s.strip().lower() for s in subreddits if s.strip()))
+    from_epoch = _parse_iso_to_epoch(from_iso, ceil=False)
+    to_epoch = _parse_iso_to_epoch(to_iso, ceil=False)
+    if from_epoch is not None and to_epoch is not None and from_epoch >= to_epoch:
+        raise ValueError("--from must be strictly earlier than --to")
+
+    tree = parse_boolean_query(query)
+    needs_exact_verify = bool(tree is not None and (_has_phrase(tree) or _has_negation(tree)))
+    run_verify = bool(verify_exact and needs_exact_verify)
+    candidates: list[tuple[str, int]] | None = None
+
+    if tree is not None:
+        expr = _fts_expr(tree, relaxed=needs_exact_verify)
+        recalled = _recall_candidates(packages, expr, None, immutable=True)
+        candidates = list(dict.fromkeys(recalled))
+        if not candidates:
+            return {
+                "status": "exact",
+                "version": version,
+                "months": [p.month for p in packages],
+                "query": query.strip(),
+                "ftsCandidates": 0,
+                "matchedThreads": 0,
+                "associatedComments": 0,
+                "reportedCommentsSum": 0,
+                "needsExactVerify": False,
+                "dateRange": {"earliest": None, "latest": None, "activeDays": 0},
+                "byMonth": [],
+                "topCommunities": [],
+                "samples": [],
+                "elapsedMs": round((time.perf_counter() - t0) * 1000),
+            }
+
+    con = duckdb.connect(config={
+        "threads": "4",
+        "memory_limit": "2560MB",
+        "preserve_insertion_order": "false",
+        "autoload_known_extensions": "false",
+        "autoinstall_known_extensions": "false",
+        **(config or {}),
+    })
+    try:
+        scalar_cols = "doc_id, created_utc, community, score, reported_comments"
+        verify_cols = f"{scalar_cols}, title, body" if run_verify else scalar_cols
+        where_clauses: list[str] = []
+        params: list[Any] = []
+        pkg_by_month = {pkg.month: pkg for pkg in packages}
+
+        if candidates is not None:
+            cand_tbl = pa.table({
+                "month": pa.array([m for m, _ in candidates], type=pa.string()),
+                "doc_id": pa.array([d for _, d in candidates], type=pa.uint32()),
+            })
+            con.register("fts_candidates", cand_tbl)
+            by_month: dict[str, list[int]] = {}
+            for m, d in candidates:
+                by_month.setdefault(m, []).append(d)
+            pruned_parts: list[str] = []
+            pruned_params: list[Any] = []
+            for pkg in packages:
+                m_ids = by_month.get(pkg.month)
+                if not m_ids:
+                    continue
+                lo, hi = min(m_ids), max(m_ids)
+                pruned_parts.append(
+                    f"SELECT ? AS month, {verify_cols} FROM read_parquet(?) "
+                    f"WHERE doc_id BETWEEN ? AND ? "
+                    f"AND doc_id IN (SELECT doc_id FROM fts_candidates WHERE month = ?)"
+                )
+                pruned_params.extend([pkg.month, pkg.posts_parquet.as_posix(), lo, hi, pkg.month])
+            if not pruned_parts:
+                return {
+                    "status": "exact",
+                    "version": version,
+                    "months": [p.month for p in packages],
+                    "query": query.strip(),
+                    "ftsCandidates": len(candidates),
+                    "matchedThreads": 0,
+                    "associatedComments": 0,
+                    "reportedCommentsSum": 0,
+                    "needsExactVerify": False,
+                    "dateRange": {"earliest": None, "latest": None, "activeDays": 0},
+                    "byMonth": [],
+                    "topCommunities": [],
+                    "samples": [],
+                    "elapsedMs": round((time.perf_counter() - t0) * 1000),
+                }
+            from_sql = f"FROM ({' UNION ALL '.join(pruned_parts)}) p"
+            params.extend(pruned_params)
+        else:
+            posts_union, posts_union_params = _union_sql(packages, "posts_parquet", verify_cols)
+            from_sql = f"FROM ({posts_union}) p"
+            params.extend(posts_union_params)
+
+        if normalized_subs:
+            placeholders = ",".join("?" for _ in normalized_subs)
+            where_clauses.append(f"p.community IN ({placeholders})")
+            params.extend(normalized_subs)
+        if from_epoch is not None:
+            where_clauses.append("p.created_utc >= ?")
+            params.append(from_epoch)
+        if to_epoch is not None:
+            where_clauses.append("p.created_utc < ?")
+            params.append(to_epoch)
+
+        if run_verify and tree is not None:
+            # Verify against post title/body first (much faster than scanning all comment bodies)
+            clause, extra = _verification_sql(tree, ("title", "body"), "")
+            where_clauses.append(clause)
+            params.extend(extra)
+
+        where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        if candidates is not None:
+            con.execute(
+                f"""
+                CREATE TEMP TABLE disc_matched AS
+                SELECT p.month, p.doc_id, p.created_utc, p.community, p.score, p.reported_comments
+                {from_sql}
+                {where_sql}
+                """,
+                params,
+            )
+            agg_row = con.execute(
+                """
+                SELECT COUNT(*)::BIGINT,
+                       MIN(created_utc)::BIGINT,
+                       MAX(created_utc)::BIGINT,
+                       COUNT(DISTINCT strftime(to_timestamp(created_utc), '%Y-%m-%d'))::BIGINT,
+                       COALESCE(SUM(COALESCE(reported_comments, 0)), 0)::BIGINT
+                FROM disc_matched
+                """
+            ).fetchone()
+            month_rows = con.execute(
+                "SELECT month, COUNT(*)::BIGINT AS cnt FROM disc_matched GROUP BY month ORDER BY month ASC"
+            ).fetchall()
+            comm_rows = con.execute(
+                "SELECT community, COUNT(*)::BIGINT AS cnt FROM disc_matched WHERE community IS NOT NULL AND community <> '' GROUP BY community ORDER BY cnt DESC, community ASC LIMIT 15"
+            ).fetchall()
+            matched_threads = int(agg_row[0] or 0) if agg_row else 0
+            associated_comments = 0
+            if include_comments_count and matched_threads > 0:
+                matched_months = {str(r[0]) for r in month_rows}
+                c_parts: list[str] = []
+                c_params: list[Any] = []
+                for pkg in packages:
+                    if pkg.month not in matched_months:
+                        continue
+                    c_parts.append(
+                        "SELECT ? AS month, post_doc_id FROM read_parquet(?) "
+                        "WHERE post_doc_id IN (SELECT doc_id FROM disc_matched WHERE month = ?)"
+                    )
+                    c_params.extend([pkg.month, pkg.comments_parquet.as_posix(), pkg.month])
+                if c_parts:
+                    c_res = con.execute(f"SELECT COUNT(*)::BIGINT FROM ({' UNION ALL '.join(c_parts)}) c", c_params).fetchone()
+                    associated_comments = int(c_res[0] or 0) if c_res else 0
+
+            samples: list[dict[str, Any]] = []
+            if include_samples and matched_threads > 0 and sample_limit > 0:
+                top_keys = con.execute(
+                    "SELECT month, doc_id FROM disc_matched ORDER BY COALESCE(score, 0) DESC, created_utc DESC LIMIT ?",
+                    [min(20, max(1, sample_limit))],
+                ).fetchall()
+                if top_keys:
+                    s_parts: list[str] = []
+                    s_params: list[Any] = []
+                    by_m: dict[str, list[int]] = {}
+                    for m, d in top_keys:
+                        by_m.setdefault(str(m), []).append(int(d))
+                    for m, ids in by_m.items():
+                        pkg = pkg_by_month.get(m)
+                        if not pkg:
+                            continue
+                        ph = ",".join("?" for _ in ids)
+                        s_parts.append(
+                            f"SELECT ? AS month, doc_id, community, created_utc, score, reported_comments, "
+                            f"left(COALESCE(title, ''), 240) AS title, left(COALESCE(body, ''), 320) AS snippet "
+                            f"FROM read_parquet(?) WHERE doc_id IN ({ph})"
+                        )
+                        s_params.extend([m, pkg.posts_parquet.as_posix(), *ids])
+                    if s_parts:
+                        scur = con.execute(
+                            f"SELECT month, doc_id, community, created_utc, score, reported_comments, title, snippet "
+                            f"FROM ({' UNION ALL '.join(s_parts)}) s ORDER BY COALESCE(score, 0) DESC, created_utc DESC",
+                            s_params,
+                        )
+                        for row in scur.fetchall():
+                            samples.append({
+                                "month": str(row[0]),
+                                "docId": int(row[1]),
+                                "community": str(row[2] or ""),
+                                "createdUtc": int(row[3]) if row[3] is not None else None,
+                                "score": int(row[4]) if row[4] is not None else 0,
+                                "reportedComments": int(row[5]) if row[5] is not None else 0,
+                                "title": str(row[6] or ""),
+                                "snippet": str(row[7] or ""),
+                            })
+        else:
+            agg_row = con.execute(
+                f"""
+                SELECT COUNT(*)::BIGINT,
+                       MIN(p.created_utc)::BIGINT,
+                       MAX(p.created_utc)::BIGINT,
+                       COUNT(DISTINCT strftime(to_timestamp(p.created_utc), '%Y-%m-%d'))::BIGINT,
+                       COALESCE(SUM(COALESCE(p.reported_comments, 0)), 0)::BIGINT
+                {from_sql}
+                {where_sql}
+                """,
+                params,
+            ).fetchone()
+            month_rows = con.execute(
+                f"SELECT p.month, COUNT(*)::BIGINT AS cnt {from_sql} {where_sql} GROUP BY p.month ORDER BY p.month ASC",
+                params,
+            ).fetchall()
+            comm_rows = con.execute(
+                f"SELECT p.community, COUNT(*)::BIGINT AS cnt {from_sql} {where_sql} GROUP BY p.community ORDER BY cnt DESC LIMIT 15",
+                params,
+            ).fetchall()
+            matched_threads = int(agg_row[0] or 0) if agg_row else 0
+            associated_comments = 0
+            samples = []
+
+        min_utc = int(agg_row[1]) if agg_row and agg_row[1] is not None else None
+        max_utc = int(agg_row[2]) if agg_row and agg_row[2] is not None else None
+        active_days = int(agg_row[3] or 0) if agg_row else 0
+        reported_sum = int(agg_row[4] or 0) if agg_row else 0
+
+        return {
+            "status": "exact" if (not needs_exact_verify or run_verify) else "candidate",
+            "version": version,
+            "months": [p.month for p in packages],
+            "query": query.strip(),
+            "ftsCandidates": len(candidates) if candidates is not None else matched_threads,
+            "matchedThreads": matched_threads,
+            "associatedComments": associated_comments,
+            "reportedCommentsSum": reported_sum,
+            "needsExactVerify": needs_exact_verify and not run_verify,
+            "dateRange": {
+                "earliest": datetime.fromtimestamp(min_utc, timezone.utc).isoformat() if min_utc is not None else None,
+                "latest": datetime.fromtimestamp(max_utc, timezone.utc).isoformat() if max_utc is not None else None,
+                "activeDays": active_days,
+            },
+            "byMonth": [{"month": str(r[0]), "count": int(r[1])} for r in month_rows],
+            "topCommunities": [{"community": str(r[0]), "count": int(r[1])} for r in comm_rows if r[0]],
+            "samples": samples,
+            "elapsedMs": round((time.perf_counter() - t0) * 1000),
+        }
     finally:
         con.close()
 

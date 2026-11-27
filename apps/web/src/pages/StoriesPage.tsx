@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
+  FileText,
   RefreshCw,
   X,
 } from 'lucide-react';
@@ -54,8 +55,8 @@ const VIEW_META: Record<StoryView, { titleZh: string; titleEn: string; subZh: st
   latest: {
     titleZh: '今日精选',
     titleEn: "Today's Stories",
-    subZh: '跨来源多源印证去重信息流 · 已存样本口径 (stored_sample)',
-    subEn: 'Cross-source deduplicated editorial stories · stored_sample',
+    subZh: '跨来源多源印证去重信息流 · 基于当前已入库报道',
+    subEn: 'Cross-source deduplicated editorial stories',
   },
   hot: {
     titleZh: '48 小时热度',
@@ -513,7 +514,7 @@ export function StoriesPage({
       ? t(VIEW_META.hot.subEn, VIEW_META.hot.subZh)
       : t('Social media posts & discussions from Reddit / X, isolated from news feeds.', 'Reddit / X 等社媒平台讨论与热点动态，与资讯信息流独立展示。')
     : v2Mode === 'stream'
-      ? t('Curated web/RSS discovery stream powered by /v1/feed/stream.', '基于订阅源的资讯流混排探索，与社媒内容分离展示。')
+      ? t('Curated industry discovery stream isolated from social feeds.', '基于订阅源的资讯推荐流，与社媒内容分离展示。')
       : v2Mode === 'hot-v2'
         ? t('Normalized heat ranking for curated web/RSS feeds.', '资讯信息流近期热度排行。')
         : lang === 'zh' ? VIEW_META[view].subZh : VIEW_META[view].subEn;
@@ -547,6 +548,24 @@ export function StoriesPage({
         </div>
 
         <div className="page-actions">
+          {actor && (
+            <button
+              type="button"
+              className="ds-btn ds-btn--brand"
+              style={{ height: 32, fontSize: 12 }}
+              onClick={() => {
+                const next = new URLSearchParams({ template: 'industry', from: 'feed', view });
+                if (sourceGroup) next.set('sourceGroup', sourceGroup);
+                if (language) next.set('language', language);
+                if (date) next.set('date', date);
+                if (activeGroupLabel) next.set('topic', `${activeGroupLabel} 行业简报`);
+                onNavigate(`/reports/new?${next.toString()}`);
+              }}
+            >
+              <FileText size={13} />
+              <span>{t('Generate Briefing', '按当前条件生成简报')}</span>
+            </button>
+          )}
           <div className="seg" role="group" aria-label={t('Reading density', '阅读密度')}>
             <button
               type="button"

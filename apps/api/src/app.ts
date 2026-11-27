@@ -5,7 +5,8 @@ import addFormats from "ajv-formats";
 import Fastify, { type FastifyRequest } from "fastify";
 import rateLimit from "@fastify/rate-limit";
 import swagger from "@fastify/swagger";
-import { registerArchiveAnalysisModule } from "../../../src/modules/archive-analysis/index";
+import { registerArchiveAnalysisModule, type ArchiveRuntimeFacade } from "../../../src/modules/archive-analysis/index";
+import { createPgExploreStudyStore, registerReportsModule } from "../../../src/modules/reports/index";
 import type { Pool } from "pg";
 import type { Actor } from "../../../packages/contracts/src/access";
 import type { ContentProvider } from "../../../src/connectors/shared/content-provider.interface";
@@ -133,6 +134,7 @@ export async function buildApp(options: {
   strongerPasswords?: boolean;
   authThrottleKey?: string;
   onRouteAuth?: (method: string, url: string, auth: DeclarativeRouteAuth) => void;
+  onArchiveRuntime?: (runtime: ArchiveRuntimeFacade) => void;
 }) {
   if (options.sessionSecret.length < 32) {
     throw new Error("SESSION_SECRET must have at least 32 characters");
@@ -312,13 +314,16 @@ export async function buildApp(options: {
   await registerContentModule(app, options.pool, shutdown.signal,
     actor => assertBrowserExportAllowed(options.pool, actor), resolveProjectScope, contentVisibility);
   await registerDocsModule(app, options.pool);
-  await registerArchiveAnalysisModule(app, options.pool);
+  const studyStore = createPgExploreStudyStore(options.pool);
+  const archiveRuntime = await registerArchiveAnalysisModule(app, options.pool, { studyStore });
+  options.onArchiveRuntime?.(archiveRuntime);
   const aiVault = options.aiCredentialVault ?? createAiCredentialVault(options.pool, options.sessionSecret);
   await registerAiModule(app, options.pool, readCollectionWorkerHealth, aiVault);
   await registerProjectsModule(app, options.pool, providers);
   await registerWorkspaceModule(app, options.pool, contentVisibility);
   await registerFeedModule(app, options.pool, contentVisibility);
   await registerIntelligenceModule(app, options.pool, providers, assertProjectWritable);
+  await registerReportsModule(app, { pool: options.pool, archiveRuntime, providers });
 
   app.get(
     "/v1/openapi.json",

@@ -56,6 +56,7 @@ interface CachedEvidenceBucket {
 
 interface CachedStudyEntry {
   studyId: string;
+  ownerUserId?: string;
   createdAt: number;
   docs: InternalDoc[];
   evidences: Map<string, CachedEvidenceBucket>;
@@ -134,10 +135,14 @@ export function resolveBuiltinEvidence(
   evidenceId: string,
   offset = 0,
   limit = 20,
+  ownerUserId?: string,
 ): ExploreEvidenceResponse | null {
   pruneStudyCache();
   const entry = studyCache.get(studyId);
   if (!entry) return null;
+  if (ownerUserId && entry.ownerUserId && entry.ownerUserId !== ownerUserId) {
+    return null;
+  }
   const bucket = entry.evidences.get(evidenceId);
   if (!bucket) return null;
   const safeOffset = Math.max(0, offset);
@@ -177,9 +182,9 @@ export function resolveBuiltinEvidence(
 
 export function runBuiltinExploreAnalysis(
   rawDocs: readonly CanonicalExploreDoc[],
-  opts: { dataVersion: string; groupBy: ExploreGroupBy; query: string },
+  opts: { dataVersion: string; groupBy: ExploreGroupBy; query: string; ownerUserId?: string },
 ): { studyId: string; analyzedDocuments: number; panels: ExplorePanelResult[] } {
-  const studyId = stableHash([SCHEMA_VERSION, opts.dataVersion, opts.groupBy, opts.query, rawDocs.length]);
+  const studyId = stableHash([SCHEMA_VERSION, opts.ownerUserId ?? "anon", opts.dataVersion, opts.groupBy, opts.query, rawDocs.length]);
   const evidences = new Map<string, CachedEvidenceBucket>();
 
   const registerEvidence = (indices: number[], predicate: Record<string, unknown>) => {
@@ -830,7 +835,7 @@ export function runBuiltinExploreAnalysis(
   }));
 
   pruneStudyCache();
-  studyCache.set(studyId, { studyId, createdAt: Date.now(), docs: allDocs, evidences });
+  studyCache.set(studyId, { studyId, ownerUserId: opts.ownerUserId, createdAt: Date.now(), docs: allDocs, evidences });
 
   return { studyId, analyzedDocuments: n, panels };
 }

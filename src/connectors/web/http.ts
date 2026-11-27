@@ -1,4 +1,4 @@
-import { Resolver } from "node:dns/promises";
+import { lookup, Resolver } from "node:dns/promises";
 import { request } from "node:https";
 import { BlockList, isIP } from "node:net";
 import { promisify } from "node:util";
@@ -79,9 +79,17 @@ export async function read(
   try {
     for (let hop = 0; hop <= 3; hop++) {
       signal.throwIfAborted();
-      const addresses = (await Promise.allSettled([
+      let addresses = (await Promise.allSettled([
         resolver.resolve4(url.hostname), resolver.resolve6(url.hostname),
       ])).flatMap((result) => result.status === "fulfilled" ? result.value : []);
+      if (!addresses.length) {
+        try {
+          const lookedUp = await lookup(url.hostname, { all: true });
+          addresses = lookedUp.map((entry) => entry.address);
+        } catch {
+          addresses = [];
+        }
+      }
       signal.throwIfAborted();
       if (!addresses.length) throw new ContentProviderError("Web source DNS lookup failed", true);
       if (!addresses.every(isPublicIp)) {

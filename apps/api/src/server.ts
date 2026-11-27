@@ -12,6 +12,8 @@ import {
   refreshRollupsForSource,
 } from "../../../src/modules/intelligence/index";
 import { attachBatchToProjectInTx } from "../../../src/modules/projects/index";
+import type { ArchiveRuntimeFacade } from "../../../src/modules/archive-analysis/index";
+import { startReportScheduler } from "../../../src/modules/reports/index";
 import { createCredentialVault, startWorker } from "../../../src/modules/collection/index";
 import { BlueskyAppViewContentConnector } from "../../../src/connectors/bluesky/bluesky-appview-content.connector";
 import { createApifyFetch } from "../../../src/connectors/reddit/apify-fetch";
@@ -74,6 +76,7 @@ export async function main() {
         strongerPasswords,
       );
     }
+    let archiveRuntime: ArchiveRuntimeFacade | undefined;
     const app = await buildApp({
       pool,
       providers,
@@ -91,6 +94,9 @@ export async function main() {
       publicRegistration:
         process.env.NODE_ENV !== "production" &&
         process.env.PUBLIC_REGISTRATION_ENABLED === "true",
+      onArchiveRuntime: (rt) => {
+        archiveRuntime = rt;
+      },
       accountEmail: emailProvider
         ? {
             provider: emailProvider,
@@ -120,6 +126,12 @@ export async function main() {
       },
     );
     const stopAiScheduler = startAiSyncScheduler(workerPool, aiVault);
+    const stopReportScheduler = startReportScheduler({
+      pool: workerPool,
+      archiveRuntime,
+      providers,
+      logError: (err, msg) => app.log.error({ err }, msg),
+    });
     const sessionCleanup = setInterval(() => {
       void pruneAccessArtifacts(workerPool).catch(() =>
         app.log.error("Access challenge and session cleanup failed"),
@@ -136,6 +148,7 @@ export async function main() {
       const deadline = setTimeout(() => process.exit(1), 15000);
       deadline.unref();
       stopAiScheduler();
+      stopReportScheduler();
       clearInterval(sessionCleanup);
       await Promise.all([app.close(), worker.stop()]);
       await Promise.all([pool.end(), workerPool.end()]);

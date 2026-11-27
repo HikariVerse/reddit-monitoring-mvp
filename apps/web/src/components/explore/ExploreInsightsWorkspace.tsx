@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ArrowRight, Database, Info, Layers, Sparkles } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Database, FileText, Info, Layers, Lock, Sparkles, Unlock } from 'lucide-react';
 import '../../styles/explore.css';
 import type {
   ExploreAnalyzeRequest,
@@ -84,7 +84,21 @@ function createRunId(): string {
   return `run_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function ExploreInsightsWorkspace({ initialProjectId }: { initialProjectId?: string }) {
+export function ExploreInsightsWorkspace({
+  initialProjectId,
+  initialArchiveRefId,
+  initialStudyId,
+  initialQuery,
+  returnTo,
+  onNavigate,
+}: {
+  initialProjectId?: string;
+  initialArchiveRefId?: string;
+  initialStudyId?: string;
+  initialQuery?: string;
+  returnTo?: string;
+  onNavigate?: (path: string) => void;
+}) {
   const { t } = useI18n();
   const projectsQuery = useProjectsQuery(true);
   const capabilitiesQuery = useQuery({
@@ -95,16 +109,29 @@ export function ExploreInsightsWorkspace({ initialProjectId }: { initialProjectI
 
   const cap = capabilitiesQuery.data;
   const projects = useMemo(() => projectsQuery.data?.projects ?? [], [projectsQuery.data?.projects]);
-  const defaultSourceMode: ExploreSourceMode = cap?.archiveAvailable ? 'archive' : 'live_content';
+  const hasOriginProject = Boolean(initialProjectId);
+  const [inheritProjectScope, setInheritProjectScope] = useState(hasOriginProject);
+  const defaultSourceMode: ExploreSourceMode =
+    hasOriginProject && inheritProjectScope
+      ? initialArchiveRefId
+        ? 'archive'
+        : 'project_content'
+      : cap?.archiveAvailable
+        ? 'archive'
+        : 'live_content';
 
-  const [queryText, setQueryText] = useState('');
-  const [sourceMode, setSourceMode] = useState<ExploreSourceMode | null>(null);
+  const [queryText, setQueryText] = useState(initialQuery ?? '');
+  const [sourceMode, setSourceMode] = useState<ExploreSourceMode | null>(
+    hasOriginProject ? (initialArchiveRefId ? 'archive' : 'project_content') : null,
+  );
   const [projectId, setProjectId] = useState(initialProjectId ?? '');
+  const [archiveRefId, setArchiveRefId] = useState(initialArchiveRefId ?? '');
   const [subredditsText, setSubredditsText] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [groupBy, setGroupBy] = useState<ExploreGroupBy>('group');
   const [profile, setProfile] = useState<ExploreProfile>('fast');
+  const [includeComments, setIncludeComments] = useState(false);
   const [sampleLimitText, setSampleLimitText] = useState('2000');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showImpactDetails, setShowImpactDetails] = useState(false);
@@ -121,7 +148,21 @@ export function ExploreInsightsWorkspace({ initialProjectId }: { initialProjectI
   const [displayedResult, setDisplayedResult] = useState<ExploreAnalyzeResponse | null>(null);
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
 
-  const resolvedSourceMode = sourceMode ?? defaultSourceMode;
+  // Restore persisted study when studyId is present in URL
+  const restoredStudyQuery = useQuery({
+    queryKey: ['explore-study', initialStudyId],
+    queryFn: ({ signal }) => liveFetch<ExploreAnalyzeResponse>(`/explore/studies/${encodeURIComponent(initialStudyId!)}`, { signal }),
+    enabled: Boolean(initialStudyId),
+    retry: false,
+  });
+
+  const originProject = useMemo(
+    () => (initialProjectId ? projects.find((p) => p.id === initialProjectId) : undefined),
+    [initialProjectId, projects],
+  );
+
+  const effectiveRestored = displayedResult ? null : restoredStudyQuery.data ?? null;
+  const resolvedSourceMode = sourceMode ?? effectiveRestored?.sourceProfile.sourceMode ?? defaultSourceMode;
   const effectiveProjectId = projectId || projects[0]?.id || '';
 
   const analyzeMut = useMutation({
@@ -155,7 +196,7 @@ export function ExploreInsightsWorkspace({ initialProjectId }: { initialProjectI
     },
   });
 
-  const result = displayedResult;
+  const result = displayedResult ?? restoredStudyQuery.data ?? null;
 
   const panelMap = useMemo(() => {
     const map = {} as Record<ExplorePanelId, ExplorePanelResult | undefined>;
@@ -206,12 +247,17 @@ export function ExploreInsightsWorkspace({ initialProjectId }: { initialProjectI
       runId,
       query: nextQuery,
       sourceMode: nextMode,
-      projectId: nextMode === 'project_content' ? (overridesReq?.projectId ?? effectiveProjectId) || undefined : undefined,
+      projectId:
+        nextMode === 'project_content' || (inheritProjectScope && archiveRefId)
+          ? (overridesReq?.projectId ?? effectiveProjectId) || undefined
+          : undefined,
+      archiveRefId: inheritProjectScope && archiveRefId ? archiveRefId : undefined,
       subreddits: (nextMode === 'archive' || nextMode === 'reddit_api') && subreddits.length > 0 ? subreddits : undefined,
       from: fromDate ? new Date(`${fromDate}T00:00:00Z`).toISOString() : null,
       to: toDate ? new Date(`${toDate}T23:59:59Z`).toISOString() : null,
       groupBy,
       profile,
+      includeComments: nextMode === 'archive' ? includeComments : undefined,
       limit: resolvedLimit,
       ...overridesReq,
     };
@@ -278,8 +324,69 @@ export function ExploreInsightsWorkspace({ initialProjectId }: { initialProjectI
     runExplore({ query: next });
   };
 
+  const returnTarget = returnTo || (initialProjectId ? `/projects?view=overview&projectId=${encodeURIComponent(initialProjectId)}` : null);
+
   return (
     <section className="explore-page-wrap">
+      {/* Project Context Inheritance Banner (when entered from a research study) */}
+      {hasOriginProject && (
+        <div
+          className="wb-alert wb-alert--info"
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 12,
+            flexWrap: 'wrap',
+            marginBottom: 12,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            {inheritProjectScope ? <Lock size={14} /> : <Unlock size={14} />}
+            <span style={{ fontSize: 12.5 }}>
+              <b>{t('From Study:', '来自研究：')}</b>
+              {originProject?.name ?? t('Selected Study', '当前研究')}
+              {' · '}
+              {inheritProjectScope
+                ? archiveRefId
+                  ? t('Locked to this study archive scope', '已继承当前研究的归档范围')
+                  : t('Locked to this study data scope', '已继承当前研究的数据范围')
+                : t('Independent free exploration mode', '已切换为独立自由探索模式')}
+            </span>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={inheritProjectScope}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  setInheritProjectScope(next);
+                  if (next) {
+                    setProjectId(initialProjectId ?? '');
+                    setArchiveRefId(initialArchiveRefId ?? '');
+                    setSourceMode(initialArchiveRefId ? 'archive' : 'project_content');
+                  } else {
+                    setArchiveRefId('');
+                    if (cap?.archiveAvailable) setSourceMode('archive');
+                  }
+                }}
+              />
+              <span>{t('Keep study scope', '沿用当前研究范围')}</span>
+            </label>
+          </div>
+          {returnTarget && onNavigate && (
+            <button
+              type="button"
+              className="ds-btn ds-btn--ghost"
+              style={{ height: 28, fontSize: 11.5 }}
+              onClick={() => onNavigate(returnTarget)}
+            >
+              <ArrowLeft size={12} />
+              <span>{t('Back to Study', '返回原研究')}</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Top Header */}
       <header className="explore-top-header">
         <div>
@@ -358,6 +465,9 @@ export function ExploreInsightsWorkspace({ initialProjectId }: { initialProjectI
         onGroupByChange={setGroupBy}
         profile={profile}
         onProfileChange={setProfile}
+        includeComments={includeComments}
+        onIncludeCommentsChange={setIncludeComments}
+        scopeLocked={hasOriginProject && inheritProjectScope}
         sampleLimitText={sampleLimitText}
         onSampleLimitChange={setSampleLimitText}
         onSampleLimitBlur={handleSampleLimitBlur}
@@ -409,12 +519,36 @@ export function ExploreInsightsWorkspace({ initialProjectId }: { initialProjectI
                   <span className="text-[11px] text-muted-foreground">· {result.elapsedMs} ms</span>
                 </div>
 
-                <Collapsible open={showImpactDetails} onOpenChange={setShowImpactDetails}>
-                  <CollapsibleTrigger render={<Button type="button" variant="ghost" size="xs" />}>
-                    <Info size={12} />
-                    <span>{showImpactDetails ? t('Hide source impact', '收起数据源口径说明') : t('Source impact notes', '查看数据源对结果的影响说明')}</span>
-                  </CollapsibleTrigger>
-                </Collapsible>
+                <div className="flex flex-wrap items-center gap-2">
+                  {onNavigate && (
+                    <Button
+                      type="button"
+                      size="xs"
+                      onClick={() => {
+                        const sp = new URLSearchParams({
+                          from: 'explore',
+                          studyId: result.studyId,
+                          topic: result.query || originProject?.name || '',
+                        });
+                        if (hasOriginProject && inheritProjectScope && initialProjectId) {
+                          sp.set('projectId', initialProjectId);
+                        } else if (resolvedSourceMode === 'project_content' && effectiveProjectId) {
+                          sp.set('projectId', effectiveProjectId);
+                        }
+                        onNavigate(`/reports/new?${sp.toString()}`);
+                      }}
+                    >
+                      <FileText size={12} />
+                      <span>{t('Generate Report from Results', '将结果生成报告')}</span>
+                    </Button>
+                  )}
+                  <Collapsible open={showImpactDetails} onOpenChange={setShowImpactDetails}>
+                    <CollapsibleTrigger render={<Button type="button" variant="ghost" size="xs" />}>
+                      <Info size={12} />
+                      <span>{showImpactDetails ? t('Hide source impact', '收起数据源口径说明') : t('Source impact notes', '查看数据源对结果的影响说明')}</span>
+                    </CollapsibleTrigger>
+                  </Collapsible>
+                </div>
               </div>
 
               {result.sourceProfile.platformBreakdown.length > 0 && (

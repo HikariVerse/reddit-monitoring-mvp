@@ -34,6 +34,7 @@ const EXPLICIT_OWNERS: Array<{ match: RegExp; owner: string }> = [
   { match: /^monitor_project_archive$/, owner: "archive-analysis" },
   { match: /^intel_.+$/, owner: "intelligence" },
   { match: /^ai_.+$/, owner: "ai" },
+  { match: /^report_[a-z0-9_]+$/, owner: "reports" },
 ];
 
 const SINGLE_WORD_TABLES = new Set(["content", "source"]);

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import type { TypeBoxTypeProvider } from "@fastify/type-provider-typebox";
 import type { Pool, PoolClient } from "pg";
@@ -18,6 +19,7 @@ import {
   type ExploreSourceProfile,
 } from "../../../packages/contracts/src/explore";
 import { fail, AppError } from "../../shared/errors";
+import { contentVisibility } from "../collection/index";
 import {
   type BatchMembership,
   compileContentFilter,
@@ -38,11 +40,37 @@ import {
   SOURCE_MODE_LABELS,
 } from "./explore-guidance";
 
+export interface ExploreStudyStore {
+  saveStudy: (entry: {
+    studyId: string;
+    ownerUserId: string;
+    projectId?: string | null;
+    archiveRefId?: string | null;
+    sourceMode: string;
+    scopeHash: string;
+    dataVersion: string;
+    request: unknown;
+    response: ExploreAnalyzeResponse;
+  }) => Promise<void>;
+  loadStudyForOwner: (studyId: string, ownerUserId: string) => Promise<{
+    studyId: string;
+    projectId: string | null;
+    archiveRefId: string | null;
+    sourceMode: string;
+    scopeHash: string;
+    dataVersion: string;
+    request: unknown;
+    response: ExploreAnalyzeResponse;
+  } | null>;
+  verifyStudyOwner: (studyId: string, ownerUserId: string) => Promise<boolean>;
+}
+
 export interface ExploreArchiveBridge {
   enabled: boolean;
   url?: URL;
   token?: string;
   timeoutMs: number;
+  studyStore?: ExploreStudyStore;
   checkArchiveStatus: (
     db: Pool | PoolClient,
     actor: Actor,
@@ -77,8 +105,34 @@ interface WorkerAnalyzePayload {
   analyzedDocuments: number;
   rawDocuments: number;
   isTruncated?: boolean;
+  timeRange?: { from: string | null; to: string | null; activeDays: number };
   elapsedMs: number;
   panels: Array<Omit<ExplorePanelResult, "scenario"> & { panel_id: ExplorePanelId }>;
+}
+
+const studyOwnerRegistry = new Map<string, { ownerUserId: string; createdAt: number }>();
+
+function registerStudyOwner(studyId: string, ownerUserId: string) {
+  studyOwnerRegistry.set(studyId, { ownerUserId, createdAt: Date.now() });
+  if (studyOwnerRegistry.size > 256) {
+    const oldest = studyOwnerRegistry.keys().next().value;
+    if (oldest) studyOwnerRegistry.delete(oldest);
+  }
+}
+
+async function assertStudyAuthorized(bridge: ExploreArchiveBridge, studyId: string, actor: Actor): Promise<void> {
+  const mem = studyOwnerRegistry.get(studyId);
+  if (mem) {
+    if (mem.ownerUserId !== actor.userId) fail(403, "study_forbidden");
+    return;
+  }
+  if (bridge.studyStore) {
+    const ok = await bridge.studyStore.verifyStudyOwner(studyId, actor.userId);
+    if (!ok) fail(403, "study_forbidden");
+    registerStudyOwner(studyId, actor.userId);
+    return;
+  }
+  fail(404, "evidence_not_found");
 }
 
 const DEFAULT_EXPLORE_LIMIT = 2000;
@@ -286,6 +340,9 @@ async function loadAuthorizedPgDocuments(
     projectSourceIds = scope.source_ids;
     projectFilter = scope.filter;
     batchMembership = "batchMembership" in scope ? scope.batchMembership : undefined;
+  } else {
+    // AUTH-01: enforce private batch visibility on all non-project PG Explore queries
+    batchMembership = contentVisibility(actor);
   }
 
   const compiled = compileContentFilter(actor, filter, projectSourceIds, projectFilter, false, batchMembership);
@@ -435,6 +492,270 @@ function attachScenarios(
   }));
 }
 
+function intersectArchiveRefScope(
+  refScope: { months: string[]; query: string; subreddits: string[]; from: string | null; to: string | null },
+  body: ExploreAnalyzeRequest,
+): { months: string[]; query: string; subreddits: string[]; from: string | null; to: string | null } {
+  const months = refScope.months;
+  const reqQuery = body.query.trim();
+  const refQuery = refScope.query.trim();
+  let query = refQuery;
+  if (reqQuery && refQuery) {
+    query = reqQuery.toLowerCase() === refQuery.toLowerCase() ? refQuery : `(${refQuery}) AND (${reqQuery})`;
+  } else if (reqQuery) {
+    query = reqQuery;
+  }
+
+  const refSubs = refScope.subreddits.map((s) => s.toLowerCase());
+  const reqSubs = (body.subreddits ?? []).map((s) => s.toLowerCase());
+  let subreddits = refSubs;
+  if (refSubs.length > 0 && reqSubs.length > 0) {
+    const allowed = new Set(refSubs);
+    const narrowed = reqSubs.filter((s) => allowed.has(s));
+    if (narrowed.length === 0) fail(400, "scope_out_of_bounds");
+    subreddits = narrowed;
+  } else if (refSubs.length === 0 && reqSubs.length > 0) {
+    subreddits = reqSubs;
+  }
+
+  const pickMaxDate = (a: string | null | undefined, b: string | null | undefined): string | null => {
+    if (!a) return b ?? null;
+    if (!b) return a;
+    return Date.parse(a) >= Date.parse(b) ? a : b;
+  };
+  const pickMinDate = (a: string | null | undefined, b: string | null | undefined): string | null => {
+    if (!a) return b ?? null;
+    if (!b) return a;
+    return Date.parse(a) <= Date.parse(b) ? a : b;
+  };
+  const from = pickMaxDate(refScope.from, body.from);
+  const to = pickMinDate(refScope.to, body.to);
+  if (from && to && Date.parse(from) >= Date.parse(to)) fail(400, "invalid_time_range");
+
+  return { months, query, subreddits, from, to };
+}
+
+export async function executeExploreAnalysis(
+  pool: Pool,
+  bridge: ExploreArchiveBridge,
+  actor: Actor,
+  body: ExploreAnalyzeRequest,
+): Promise<ExploreAnalyzeResponse> {
+  const runId = body.runId;
+  const t0 = Date.now();
+  const groupBy = body.groupBy ?? "group";
+  const profile = body.profile ?? "fast";
+  const limit = body.limit ?? DEFAULT_EXPLORE_LIMIT;
+  const scopeHash = createHash("sha256")
+    .update(JSON.stringify([actor.userId, body.sourceMode, body.projectId ?? null, body.archiveRefId ?? null, body.query.trim(), body.subreddits ?? [], body.from ?? null, body.to ?? null, body.platforms ?? [], groupBy, profile, Boolean(body.includeComments), limit]))
+    .digest("hex");
+
+  setLocalProgress(runId, actor.userId, {
+    stage: "retrieving",
+    stageLabel: "正在校验数据权限与引擎状态",
+    percent: 5,
+  });
+
+  const archiveStatus = await bridge.checkArchiveStatus(pool, actor);
+
+  const finalizeAndPersist = async (response: ExploreAnalyzeResponse) => {
+    registerStudyOwner(response.studyId, actor.userId);
+    if (bridge.studyStore) {
+      await bridge.studyStore.saveStudy({
+        studyId: response.studyId,
+        ownerUserId: actor.userId,
+        projectId: body.projectId ?? null,
+        archiveRefId: body.archiveRefId ?? null,
+        sourceMode: body.sourceMode,
+        scopeHash,
+        dataVersion: response.dataVersion,
+        request: body,
+        response,
+      }).catch(() => {});
+    }
+    return response;
+  };
+
+  if (body.sourceMode === "archive") {
+    if (!archiveStatus.available) {
+      fail(503, archiveStatus.state || "archive_offline");
+    }
+    let months = archiveStatus.months;
+    let query = body.query.trim();
+    let subreddits = body.subreddits ?? [];
+    let from = body.from ?? null;
+    let to = body.to ?? null;
+
+    if (body.projectId && body.archiveRefId) {
+      const ref = await bridge.getProjectArchiveRef(actor, body.projectId, body.archiveRefId);
+      const bounded = intersectArchiveRefScope(ref.scope, body);
+      months = bounded.months;
+      query = bounded.query;
+      subreddits = bounded.subreddits;
+      from = bounded.from;
+      to = bounded.to;
+    }
+
+    setLocalProgress(runId, actor.userId, {
+      delegatedToPython: true,
+      stage: "retrieving",
+      stageLabel: `正在通过 DuckDB + FTS5 检索 ${months.length} 个月归档数据`,
+      percent: 10,
+    });
+
+    const workerResult = await callPythonWorker<WorkerAnalyzePayload>(bridge, "analyze/archive", {
+      runId,
+      months,
+      query,
+      subreddits,
+      from,
+      to,
+      includeComments: Boolean(body.includeComments),
+      groupBy,
+      profile,
+      limit,
+    });
+    const panels = attachScenarios(workerResult.panels);
+    const actualTimeRange = workerResult.timeRange ?? {
+      from: from ? from.slice(0, 10) : (months[0] ? `${months[0]}-01` : null),
+      to: to ? to.slice(0, 10) : null,
+      activeDays: 0,
+    };
+    const sourceProfile: ExploreSourceProfile = {
+      sourceMode: "archive",
+      sourceLabel: SOURCE_MODE_LABELS.archive,
+      engine: "duckdb_potion_worker",
+      engineLabel: "DuckDB + Potion Python 分析引擎",
+      potionModelReady: workerResult.potionModelReady,
+      rawDocuments: workerResult.rawDocuments,
+      analyzedDocuments: workerResult.analyzedDocuments,
+      isSampled: Boolean(workerResult.isTruncated),
+      sampleCap: limit,
+      timeRange: actualTimeRange,
+      platformBreakdown: [{ platform: "reddit_archive", documents: workerResult.analyzedDocuments, sharePct: 100 }],
+      impactNotes: buildSourceImpactNotes("archive", "duckdb_potion_worker", {
+        potionModelReady: workerResult.potionModelReady,
+        isSampled: Boolean(workerResult.isTruncated),
+        sampleCap: limit,
+        analyzedDocuments: workerResult.analyzedDocuments,
+        platformCount: 1,
+      }),
+    };
+
+    return finalizeAndPersist({
+      studyId: workerResult.studyId,
+      dataVersion: workerResult.dataVersion,
+      query,
+      generatedAt: new Date().toISOString(),
+      elapsedMs: Date.now() - t0,
+      sourceProfile,
+      panels,
+      guidedNextSteps: buildDynamicGuidance(query, sourceProfile, panels, true),
+    });
+  }
+
+  // Live / API / Project PG16 content sources
+  setLocalProgress(runId, actor.userId, {
+    stage: "retrieving",
+    stageLabel: "正在从 PG16 检索当前账号已授权内容",
+    percent: 15,
+  });
+  const pg = await loadAuthorizedPgDocuments(pool, actor, body);
+  const workerHealth = await checkPythonWorkerHealth(bridge);
+
+  if (workerHealth.pythonWorkerReady && pg.docs.length > 0) {
+    try {
+      setLocalProgress(runId, actor.userId, {
+        delegatedToPython: true,
+        stage: "ingesting",
+        stageLabel: `已载入 ${pg.docs.length} 条站内记录，移交 Potion 分析引擎`,
+        percent: 22,
+        rawDocuments: pg.rawCount,
+      });
+      const seeds = body.query
+        .trim()
+        .split(/\s+/)
+        .filter((s) => s.length >= 2 && !/^(AND|OR|NOT)$/i.test(s))
+        .slice(0, 8);
+      const workerResult = await callPythonWorker<WorkerAnalyzePayload>(bridge, "analyze/documents", {
+        runId,
+        documents: pg.docs,
+        dataVersion: pg.dataVersion,
+        seeds,
+        groupBy,
+        profile,
+      });
+      const panels = attachScenarios(workerResult.panels);
+      const sourceProfile = summarizeSourceProfile(
+        body.sourceMode,
+        "python_potion_worker",
+        workerResult.potionModelReady,
+        pg.rawCount,
+        workerResult.analyzedDocuments,
+        pg.isSampled,
+        pg.sampleCap,
+        pg.docs,
+      );
+      return finalizeAndPersist({
+        studyId: workerResult.studyId,
+        dataVersion: workerResult.dataVersion,
+        query: body.query.trim(),
+        generatedAt: new Date().toISOString(),
+        elapsedMs: Date.now() - t0,
+        sourceProfile,
+        panels,
+        guidedNextSteps: buildDynamicGuidance(body.query.trim(), sourceProfile, panels, archiveStatus.available),
+      });
+    } catch {
+      // Gracefully degrade to builtin fast engine if Python worker fails mid-flight
+    }
+  }
+
+  const fallback = runBuiltinExploreAnalysis(pg.docs, {
+    dataVersion: pg.dataVersion,
+    groupBy,
+    query: body.query.trim(),
+    ownerUserId: actor.userId,
+  });
+  const sourceProfile = summarizeSourceProfile(
+    body.sourceMode,
+    "pg_builtin_fast",
+    false,
+    pg.rawCount,
+    fallback.analyzedDocuments,
+    pg.isSampled,
+    pg.sampleCap,
+    pg.docs,
+  );
+  return finalizeAndPersist({
+    studyId: fallback.studyId,
+    dataVersion: pg.dataVersion,
+    query: body.query.trim(),
+    generatedAt: new Date().toISOString(),
+    elapsedMs: Date.now() - t0,
+    sourceProfile,
+    panels: fallback.panels,
+    guidedNextSteps: buildDynamicGuidance(body.query.trim(), sourceProfile, fallback.panels, archiveStatus.available),
+  });
+}
+
+export async function executeExploreEvidence(
+  bridge: ExploreArchiveBridge,
+  actor: Actor,
+  body: ExploreEvidenceRequest,
+): Promise<ExploreEvidenceResponse> {
+  const { studyId, evidenceId, offset = 0, limit = 20 } = body;
+  await assertStudyAuthorized(bridge, studyId, actor);
+  const local = resolveBuiltinEvidence(studyId, evidenceId, offset, limit, actor.userId);
+  if (local) return local;
+  return callPythonWorker<ExploreEvidenceResponse>(bridge, "analyze/evidence", {
+    studyId,
+    evidenceId,
+    offset,
+    limit,
+  });
+}
+
 export function registerExploreRoutes(app: FastifyInstance, pool: Pool, bridge: ExploreArchiveBridge) {
   const api = app.withTypeProvider<TypeBoxTypeProvider>();
   const read = { auth: { access: "authenticated", browserOnly: true } } as const;
@@ -448,7 +769,7 @@ export function registerExploreRoutes(app: FastifyInstance, pool: Pool, bridge: 
         bridge.checkArchiveStatus(pool, actor),
         checkPythonWorkerHealth(bridge),
         (async () => {
-          const compiled = compileContentFilter(actor, {});
+          const compiled = compileContentFilter(actor, {}, undefined, {}, false, contentVisibility(actor));
           const { rows } = await pool.query<{ code: string; cnt: string }>(
             `SELECT p.code, COUNT(DISTINCT c.id)::text AS cnt FROM ${contentSourceTables} WHERE ${compiled.text} GROUP BY p.code`,
             compiled.values,
@@ -522,197 +843,24 @@ export function registerExploreRoutes(app: FastifyInstance, pool: Pool, bridge: 
   api.post(
     "/v1/explore/analyze",
     { config: read, schema: { body: ExploreAnalyzeRequest, response: { 200: ExploreAnalyzeResponse } } },
-    async (request) => {
-      const actor = request.actor!;
-      const body = request.body;
-      const runId = body.runId;
-      const t0 = Date.now();
-      const groupBy = body.groupBy ?? "group";
-      const profile = body.profile ?? "fast";
-      const limit = body.limit ?? DEFAULT_EXPLORE_LIMIT;
-
-      setLocalProgress(runId, actor.userId, {
-        stage: "retrieving",
-        stageLabel: "正在校验数据权限与引擎状态",
-        percent: 5,
-      });
-
-      const archiveStatus = await bridge.checkArchiveStatus(pool, actor);
-
-      if (body.sourceMode === "archive") {
-        if (!archiveStatus.available) {
-          fail(503, archiveStatus.state || "archive_offline");
-        }
-        let months = archiveStatus.months;
-        let query = body.query.trim();
-        let subreddits = body.subreddits ?? [];
-        let from = body.from ?? null;
-        let to = body.to ?? null;
-
-        if (body.projectId && body.archiveRefId) {
-          const ref = await bridge.getProjectArchiveRef(actor, body.projectId, body.archiveRefId);
-          months = ref.scope.months;
-          if (!query && ref.scope.query) query = ref.scope.query;
-          if (!subreddits.length && ref.scope.subreddits.length) subreddits = ref.scope.subreddits;
-          if (!from && ref.scope.from) from = ref.scope.from;
-          if (!to && ref.scope.to) to = ref.scope.to;
-        }
-
-        setLocalProgress(runId, actor.userId, {
-          delegatedToPython: true,
-          stage: "retrieving",
-          stageLabel: `正在通过 DuckDB + FTS5 检索 ${months.length} 个月归档数据`,
-          percent: 10,
-        });
-
-        const workerResult = await callPythonWorker<WorkerAnalyzePayload>(bridge, "analyze/archive", {
-          runId,
-          months,
-          query,
-          subreddits,
-          from,
-          to,
-          includeComments: Boolean(body.includeComments),
-          groupBy,
-          profile,
-          limit,
-        });
-        const panels = attachScenarios(workerResult.panels);
-        const sourceProfile: ExploreSourceProfile = {
-          sourceMode: "archive",
-          sourceLabel: SOURCE_MODE_LABELS.archive,
-          engine: "duckdb_potion_worker",
-          engineLabel: "DuckDB + Potion Python 分析引擎",
-          potionModelReady: workerResult.potionModelReady,
-          rawDocuments: workerResult.rawDocuments,
-          analyzedDocuments: workerResult.analyzedDocuments,
-          isSampled: Boolean(workerResult.isTruncated),
-          sampleCap: limit,
-          timeRange: {
-            from: months[0] ? `${months[0]}-01` : null,
-            to: months.at(-1) ? `${months.at(-1)}-28` : null,
-            activeDays: 0,
-          },
-          platformBreakdown: [{ platform: "reddit_archive", documents: workerResult.analyzedDocuments, sharePct: 100 }],
-          impactNotes: buildSourceImpactNotes("archive", "duckdb_potion_worker", {
-            potionModelReady: workerResult.potionModelReady,
-            isSampled: Boolean(workerResult.isTruncated),
-            sampleCap: limit,
-            analyzedDocuments: workerResult.analyzedDocuments,
-            platformCount: 1,
-          }),
-        };
-
-        return {
-          studyId: workerResult.studyId,
-          dataVersion: workerResult.dataVersion,
-          query,
-          generatedAt: new Date().toISOString(),
-          elapsedMs: Date.now() - t0,
-          sourceProfile,
-          panels,
-          guidedNextSteps: buildDynamicGuidance(query, sourceProfile, panels, true),
-        };
-      }
-
-      // Live / API / Project PG16 content sources
-      setLocalProgress(runId, actor.userId, {
-        stage: "retrieving",
-        stageLabel: "正在从 PG16 检索当前账号已授权内容",
-        percent: 15,
-      });
-      const pg = await loadAuthorizedPgDocuments(pool, actor, body);
-      const workerHealth = await checkPythonWorkerHealth(bridge);
-
-      if (workerHealth.pythonWorkerReady && pg.docs.length > 0) {
-        try {
-          setLocalProgress(runId, actor.userId, {
-            delegatedToPython: true,
-            stage: "ingesting",
-            stageLabel: `已载入 ${pg.docs.length} 条站内记录，移交 Potion 分析引擎`,
-            percent: 22,
-            rawDocuments: pg.rawCount,
-          });
-          const seeds = body.query
-            .trim()
-            .split(/\s+/)
-            .filter((s) => s.length >= 2 && !/^(AND|OR|NOT)$/i.test(s))
-            .slice(0, 8);
-          const workerResult = await callPythonWorker<WorkerAnalyzePayload>(bridge, "analyze/documents", {
-            runId,
-            documents: pg.docs,
-            dataVersion: pg.dataVersion,
-            seeds,
-            groupBy,
-            profile,
-          });
-          const panels = attachScenarios(workerResult.panels);
-          const sourceProfile = summarizeSourceProfile(
-            body.sourceMode,
-            "python_potion_worker",
-            workerResult.potionModelReady,
-            pg.rawCount,
-            workerResult.analyzedDocuments,
-            pg.isSampled,
-            pg.sampleCap,
-            pg.docs,
-          );
-          return {
-            studyId: workerResult.studyId,
-            dataVersion: workerResult.dataVersion,
-            query: body.query.trim(),
-            generatedAt: new Date().toISOString(),
-            elapsedMs: Date.now() - t0,
-            sourceProfile,
-            panels,
-            guidedNextSteps: buildDynamicGuidance(body.query.trim(), sourceProfile, panels, archiveStatus.available),
-          };
-        } catch {
-          // Gracefully degrade to builtin fast engine if Python worker fails mid-flight
-        }
-      }
-
-      const fallback = runBuiltinExploreAnalysis(pg.docs, {
-        dataVersion: pg.dataVersion,
-        groupBy,
-        query: body.query.trim(),
-      });
-      const sourceProfile = summarizeSourceProfile(
-        body.sourceMode,
-        "pg_builtin_fast",
-        false,
-        pg.rawCount,
-        fallback.analyzedDocuments,
-        pg.isSampled,
-        pg.sampleCap,
-        pg.docs,
-      );
-      return {
-        studyId: fallback.studyId,
-        dataVersion: pg.dataVersion,
-        query: body.query.trim(),
-        generatedAt: new Date().toISOString(),
-        elapsedMs: Date.now() - t0,
-        sourceProfile,
-        panels: fallback.panels,
-        guidedNextSteps: buildDynamicGuidance(body.query.trim(), sourceProfile, fallback.panels, archiveStatus.available),
-      };
-    },
+    async (request) => executeExploreAnalysis(pool, bridge, request.actor!, request.body),
   );
 
   api.post(
     "/v1/explore/evidence",
     { config: read, schema: { body: ExploreEvidenceRequest, response: { 200: ExploreEvidenceResponse } } },
+    async (request) => executeExploreEvidence(bridge, request.actor!, request.body),
+  );
+
+  api.get(
+    "/v1/explore/studies/:studyId",
+    { config: read },
     async (request) => {
-      const { studyId, evidenceId, offset = 0, limit = 20 } = request.body;
-      const local = resolveBuiltinEvidence(studyId, evidenceId, offset, limit);
-      if (local) return local;
-      return callPythonWorker<ExploreEvidenceResponse>(bridge, "analyze/evidence", {
-        studyId,
-        evidenceId,
-        offset,
-        limit,
-      });
+      const studyId = String((request.params as { studyId?: string }).studyId ?? "");
+      if (!studyId || !bridge.studyStore) fail(404, "study_not_found");
+      const saved = await bridge.studyStore.loadStudyForOwner(studyId, request.actor!.userId);
+      if (!saved) fail(404, "study_not_found");
+      return saved;
     },
   );
 }

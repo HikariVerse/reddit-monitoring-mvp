@@ -1,15 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowRight,
+  ArrowLeft,
   Copy,
   Download,
-  Edit3,
   Globe,
-  Link2,
   Plus,
   RefreshCw,
-  Sparkles,
-  Trash2,
   X,
 } from 'lucide-react';
 import {
@@ -27,9 +23,9 @@ import {
   useSourcesQuery,
   useUpdateProjectMutation,
 } from '../api/hooks';
+import { useReportsListQuery } from '../api/reports';
 import { apiClient } from '../api/client';
 import { InlineMfaStepUp } from '../components/InlineMfaStepUp';
-import { Badge } from '../components/ui/badge';
 import { IntelligenceAnalyticsView } from '../components/projects/IntelligenceAnalyticsView';
 import { ContentResearchWorkspace } from '../components/research/ContentResearchWorkspace';
 import { ProjectCollectView } from '../components/ProjectCollectView';
@@ -37,11 +33,20 @@ import { ReaderDrawer } from '../components/stories/ReaderDrawer';
 import type { ReaderPreview } from '../components/stories/readerTypes';
 import '../styles/collection.css';
 import {
-  ProjectBatchesView,
   ProjectJobsView,
-  ProjectListView,
-  ViewerPersonalJobsView,
 } from '../components/ProjectWorkspaceViews';
+import {
+  AvailableResourcesView,
+  ProjectAnalysisHubHeader,
+  ProjectContextHeader,
+  ProjectMaterialsView,
+  ProjectReportsTabView,
+  ProjectSummaryView,
+  ResearchListView,
+  ResearchTasksView,
+  type ProjectTabKey,
+} from '../components/ResearchSpaceViews';
+import { ReportSchedulesPanel } from '../components/reports/ReportSchedulesPanel';
 import { isResearchSource } from '../lib/collectionLimits';
 import {
   type Actor,
@@ -300,18 +305,38 @@ function ProjectForkPublishActions({
   );
 }
 
+type ProjectPageView = 'list' | 'resources' | 'my-jobs' | 'summary' | 'collect' | 'jobs' | 'batches' | 'overview' | 'intelligence' | 'reports';
+
 function resolveProjectActiveView(
   urlView: string,
-  canWrite: boolean,
-  selectedProject: Project | undefined,
-): 'list' | 'collect' | 'jobs' | 'my-jobs' | 'batches' | 'overview' | 'intelligence' {
-  if (urlView === 'list' || urlView === 'collect' || urlView === 'jobs' || urlView === 'my-jobs' || urlView === 'batches' || urlView === 'overview' || urlView === 'intelligence') {
+  urlProjectId: string,
+): ProjectPageView {
+  if (
+    urlView === 'list' ||
+    urlView === 'resources' ||
+    urlView === 'my-jobs' ||
+    urlView === 'summary' ||
+    urlView === 'collect' ||
+    urlView === 'jobs' ||
+    urlView === 'batches' ||
+    urlView === 'overview' ||
+    urlView === 'intelligence' ||
+    urlView === 'reports'
+  ) {
     return urlView;
   }
-  if (canWrite && selectedProject && selectedProject.dataset_mode === 'batch' && (selectedProject.enabled_batch_count ?? 0) === 0) {
-    return 'collect';
+  if (!urlProjectId) {
+    return 'list';
   }
-  return 'overview';
+  return 'summary';
+}
+
+function resolveActiveProjectTab(view: ProjectPageView): ProjectTabKey {
+  if (view === 'batches' || view === 'collect') return 'batches';
+  if (view === 'overview') return 'overview';
+  if (view === 'jobs' || view === 'intelligence') return 'jobs';
+  if (view === 'reports') return 'reports';
+  return 'summary';
 }
 
 function ProjectAdvancedFilterFields({
@@ -488,7 +513,13 @@ export function ProjectsPage({
     ? undefined
     : projects.find((p) => p.id === (urlProjectId || selectedProjectId)) || projects[0];
   const canWrite = Boolean(selectedProject?.can_edit ?? isAdmin);
-  const activeView = resolveProjectActiveView(urlView, canWrite, selectedProject);
+  const activeView = resolveProjectActiveView(urlView, urlProjectId);
+  const isSpaceLevelView = activeView === 'list' || activeView === 'resources' || activeView === 'my-jobs';
+  const projectReportsQuery = useReportsListQuery(
+    { projectId: selectedProject?.id, limit: 20 },
+    Boolean(selectedProject?.id) && !isSpaceLevelView,
+  );
+  const projectReportCount = projectReportsQuery.data?.reports.length ?? 0;
   const go = useCallback(
     (path: string) => {
       if (onNavigate) onNavigate(path);
@@ -496,7 +527,7 @@ export function ProjectsPage({
     [onNavigate],
   );
   const overviewQuery = useProjectOverviewQuery(selectedProject?.id, selectedProject?.revision);
-  const overview = overviewQuery.data;
+  void overviewQuery;
 
   const [windowEnd] = useState(() => Math.floor(Date.now() / 86_400_000) * 86_400_000 + 86_400_000);
   const windowFrom = new Date(windowEnd - 30 * 86_400_000).toISOString();
@@ -526,8 +557,6 @@ export function ProjectsPage({
     });
   }, [contentQuery.data?.items]);
 
-  const [openFilterPop, setOpenFilterPop] = useState<'platforms' | 'signal' | 'kind' | 'share' | null>(null);
-  const [shareCopied, setShareCopied] = useState(false);
   const [pageBanner, setPageBanner] = useState<string | null>(null);
 
   const [modalMode, setModalMode] = useState<'create' | 'edit' | null>(null);
@@ -591,16 +620,7 @@ export function ProjectsPage({
     return undefined;
   }, [openNewFromUrl, canCreateProject, openCreate, requestedSource, requestedSourceId, sourcesQuery.isPending, t]);
 
-  useEffect(() => {
-    if (!openFilterPop) return;
-    const onDown = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest('[data-ov-pop]')) {
-        setOpenFilterPop(null);
-      }
-    };
-    window.addEventListener('mousedown', onDown);
-    return () => window.removeEventListener('mousedown', onDown);
-  }, [openFilterPop]);
+  // Removed unused filter pop listener
 
   const openEdit = (p: Project) => {
     setModalMode('edit');
@@ -708,28 +728,27 @@ export function ProjectsPage({
     }
   };
 
-  const hasBoundPushSource = Boolean(
-    selectedProject?.source_ids.some(
-      (sid) => sources.find((s) => s.id === sid)?.deliveryMode === 'push',
-    ),
-  );
   const exportDisabled = !isAdmin && quotasSummaryQuery.data?.effectivePolicy.exportEnabled === false;
 
   const shareUrl = selectedProject ? new URL(
-    `/projects?view=overview&projectId=${encodeURIComponent(selectedProject.id)}`, window.location.origin,
+    `/projects?view=summary&projectId=${encodeURIComponent(selectedProject.id)}`, window.location.origin,
   ).href : '';
+  const activeTab = resolveActiveProjectTab(activeView);
+
   return (
     <div className="ds-page">
       {/* Breadcrumb */}
       <div className="crumb">
         <button type="button" onClick={() => go('/projects?view=list')}>
-          {t('Research Workspace', '研究工作区')}
+          {t('Research Space', '研究空间')}
         </button>
         <span>/</span>
         {activeView === 'my-jobs' ? (
-          <b>{t('My Collection Jobs', '我的采集任务记录')}</b>
+          <b>{t('Task Records', '任务记录')}</b>
+        ) : activeView === 'resources' ? (
+          <b>{t('Available Materials', '可用资料')}</b>
         ) : activeView === 'list' ? (
-          <b>{t('All Projects', '全部项目')}</b>
+          <b>{t('All Studies', '全部研究')}</b>
         ) : (
           <>
             <button
@@ -737,188 +756,67 @@ export function ProjectsPage({
               onClick={() =>
                 go(
                   selectedProject
-                    ? `/projects?view=overview&projectId=${encodeURIComponent(selectedProject.id)}`
+                    ? `/projects?view=summary&projectId=${encodeURIComponent(selectedProject.id)}`
                     : '/projects?view=list',
                 )
               }
             >
-              {selectedProject?.name || t('Projects', '全部项目')}
+              {selectedProject?.name || t('All Studies', '全部研究')}
             </button>
             <span>/</span>
             <b>
-              {activeView === 'collect'
-                ? t('Data Ingestion', '数据接入')
-                : activeView === 'jobs'
-                  ? t('Collection Jobs', '采集任务')
+              {activeView === 'summary'
+                ? t('Overview', '概览')
+                : activeView === 'collect'
+                  ? t('Collect Fresh Materials', '获取最新资料')
                   : activeView === 'batches'
-                    ? t('Data Batches', '数据批次')
-                    : activeView === 'intelligence'
-                      ? t('Intelligence Insights (V2)', '智能监测洞察 (V2)')
-                      : t('Content Research', '内容研究')}
+                    ? t('Materials', '研究资料')
+                    : activeView === 'jobs'
+                      ? t('Collection & Monitor', '采集与监测')
+                      : activeView === 'intelligence'
+                        ? t('Monitoring Insights', '监测看板')
+                        : activeView === 'reports'
+                          ? t('Reports', '研究报告')
+                          : t('Analysis & Explore', '分析与探索')}
             </b>
           </>
         )}
       </div>
 
-      {/* DeepSeek Page Header */}
-      {activeView !== 'collect' && <div className="page-head">
-        <div>
-          <div className="page-title-row">
-            <h1 className="page-title">{selectedProject ? selectedProject.name : t('Monitoring Overview', '监测总览')}</h1>
-            {selectedProject && (
-              <>
-                <Badge variant="secondary">
-                  {selectedProject.dataset_mode === 'batch' ? t('Batch project', '批次型项目') : t('Source-filter project', '来源型项目')}
-                </Badge>
-                <Badge variant="secondary">
-                  {selectedProject.visibility === 'shared' || selectedProject.is_shared ? t('Shared', '共享') : t('Private', '私有')}
-                </Badge>
-              </>
-            )}
-          </div>
-          {selectedProject && <p className="page-desc">
-            {selectedProject.dataset_mode === 'batch'
-              ? t(
-                  `${selectedProject.enabled_batch_count ?? '—'} enabled batches · ${selectedProject.data_summary?.item_count ?? 0} samples`,
-                  `${selectedProject.enabled_batch_count ?? '—'} 个启用批次 · ${selectedProject.data_summary?.item_count ?? 0} 条样本`,
-                )
-              : t(`${selectedProject.source_ids.length} bound sources`, `${selectedProject.source_ids.length} 个绑定来源`)}
-            {' · '}{t('Revision', '版本')} {selectedProject.revision}
-            {overview && <> · {t('Coverage', '口径')} <b>{t('Stored samples', '已存样本')}</b></>}
-            {(selectedProject.dataset_mode === 'batch' || hasBoundPushSource) && <> · {
-              selectedProject.dataset_mode === 'batch' || selectedProject.include_push_in_trends
-                ? t('Push/R4 included in trends', '趋势已计入推流/归档样本')
-                : t('Trends use pull samples', '趋势使用拉取样本')
-            }</>}
-          </p>}
-        </div>
-
-        <div className="page-actions" data-ov-pop>
-          <div style={{ position: 'relative' }}>
-            <button
-              type="button"
-              className="ds-btn ds-btn--ghost"
-              disabled={!selectedProject}
-              onClick={() => { setShareCopied(false); setOpenFilterPop(openFilterPop === 'share' ? null : 'share'); }}
-            >
-              <Link2 size={13} />
-              <span>{t('Share', '分享')}</span>
-            </button>
-
-            {openFilterPop === 'share' && (
-              <div className="ds-pop" style={{ top: 'calc(100% + 6px)', right: 0, width: 290 }}>
-                <div className="pop-hd">
-                  <span>{t('Share project link', '分享项目链接')}</span>
-                  <span>stored_sample</span>
-                </div>
-                <p style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.5, margin: '0 4px 10px' }}>
-                  {t('Recipients open the project with their existing access.', '接收者使用已有权限打开此项目。')}
-                </p>
-                <div style={{ display: 'flex', gap: 6, padding: '6px 8px', background: '#fbfcf7', border: '1px solid var(--line)', borderRadius: 5, alignItems: 'center' }}>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {shareUrl}
-                  </span>
-                  <button
-                    type="button"
-                    className="ds-btn"
-                    style={{ height: 24, padding: '0 9px', fontSize: 10 }}
-                    onClick={async () => {
-                      try {
-                        await navigator.clipboard.writeText(shareUrl);
-                        setShareCopied(true);
-                      } catch (err) {
-                        setPageBanner(formatApiError(err));
-                      }
-                    }}
-                  >
-                    <Copy size={11} />
-                    {shareCopied ? t('Copied', '已复制') : t('Copy', '复制')}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {activeView === 'overview' && selectedProject && (
-            <button
-              type="button"
-              className="ds-btn ds-btn--ghost"
-              onClick={() => onDrilldown(selectedProject.id)}
-            >
-              <span>{t('Explore All', '全部检索')}</span>
-              <ArrowRight size={13} />
-            </button>
-          )}
-
-          {activeView === 'overview' && monitors.length > 0 && selectedProject && (
-            <button
-              type="button"
-              className="ds-btn ds-btn--ghost"
-              onClick={() => go(`/projects?view=intelligence&projectId=${encodeURIComponent(selectedProject.id)}`)}
-            >
-              <Sparkles size={13} />
-              <span>{t('Intelligence V2', '智能洞察 V2')}</span>
-            </button>
-          )}
-
-          {activeView === 'overview' && <ProjectEvidenceExport
-            isAdmin={isAdmin}
-            quota={quotasSummaryQuery}
-            ready={contentQuery.isSuccess}
-            content={rawItems}
-            projectId={selectedProject?.id}
-            activeFilter={{
-              from: windowFrom,
-              to: windowTo,
-              threadAware,
-              deliveryMode: selectedProject?.dataset_mode === 'source_filter' && !selectedProject.include_push_in_trends
-                ? 'pull' : undefined,
-            }}
-          />}
-
-          {selectedProject && (
+      {/* Fixed 5-Tab Project Context Header when inside a research study */}
+      {!isSpaceLevelView && selectedProject && (
+        <ProjectContextHeader
+          project={selectedProject}
+          activeTab={activeTab}
+          monitors={monitors}
+          reportCount={projectReportCount}
+          isAdmin={isAdmin}
+          canWrite={canWrite}
+          shareUrl={shareUrl}
+          onNavigate={go}
+          onEdit={() => openEdit(selectedProject)}
+          onDelete={() => void handleDelete(selectedProject)}
+          onBanner={setPageBanner}
+          forkPublishSlot={
             <ProjectForkPublishActions
               project={selectedProject}
               isAdmin={isAdmin}
               onForked={(forkedId) => {
                 onSelectProjectId(forkedId);
-                go(`/projects?view=overview&projectId=${encodeURIComponent(forkedId)}`);
+                go(`/projects?view=summary&projectId=${encodeURIComponent(forkedId)}`);
               }}
               onBanner={setPageBanner}
             />
-          )}
+          }
+        />
+      )}
 
-          {canWrite && selectedProject && (
-            <>
-              <button type="button" className="ds-btn ds-btn--ghost" onClick={() => openEdit(selectedProject)}>
-                <Edit3 size={13} />
-                <span>{t('Edit', '编辑')}</span>
-              </button>
-              <button
-                type="button"
-                className="icon-square"
-                onClick={() => handleDelete(selectedProject)}
-                title={t('Delete Project', '删除项目')}
-              >
-                <Trash2 size={14} color="#a8462f" />
-              </button>
-            </>
-          )}
-          {canCreateProject && (
-            <button type="button" className="ds-btn" onClick={() => openCreate()}>
-              <Plus size={14} />
-              <span>{t('New Research Project', '新建研究项目')}</span>
-            </button>
-          )}
-        </div>
-      </div>}
-
-      {activeView !== 'collect' && selectedProject && !canWrite && (
+      {!isSpaceLevelView && activeView !== 'collect' && selectedProject && !canWrite && (
         <div className="wb-alert wb-alert--info" style={{ marginBottom: 14 }}>
           <span>
             {t(
-              'Shared project (read-only): you can analyze, drill down, export, and save notes. Create your own private project to collect or manage custom batches.',
-              '当前为共享只读项目：可正常分析、钻取、导出并写个人批注；如需自定义采集与批次管理，请点击右上角新建私有研究项目。',
+              'Shared study (read-only): you can analyze, explore, export, and generate reports. Create your own private study to collect or modify materials.',
+              '当前为团队共享只读研究：可正常分析、探索、导出与生成报告；如需自定义采集与管理资料，请新建个人私有研究。',
             )}
           </span>
         </div>
@@ -927,105 +825,178 @@ export function ProjectsPage({
       {pageBanner && <div className="wb-alert wb-alert--error" style={{ marginBottom: 14 }}>{pageBanner}</div>}
 
       {activeView === 'my-jobs' ? (
-        <ViewerPersonalJobsView onNavigate={go} />
+        <ResearchTasksView actor={actor} onNavigate={go} />
+      ) : activeView === 'resources' ? (
+        <AvailableResourcesView onNavigate={go} />
       ) : activeView === 'list' ? (
-        <ProjectListView
+        <ResearchListView
           projects={projects}
           activeProjectId={selectedProject?.id}
           maxProjects={quotasSummaryQuery.data?.effectivePolicy.maxProjects}
           isViewer={!isAdmin}
           monitors={monitors}
-          onSelect={(p) => {
+          onOpenSummary={(p) => {
             onSelectProjectId(p.id);
-            const nextView = p.dataset_mode === 'batch' && (p.enabled_batch_count ?? 0) === 0 ? 'collect' : 'overview';
-            go(`/projects?view=${nextView}&projectId=${encodeURIComponent(p.id)}`);
+            go(`/projects?view=summary&projectId=${encodeURIComponent(p.id)}`);
+          }}
+          onOpenAnalysis={(p) => {
+            onSelectProjectId(p.id);
+            go(`/projects?view=overview&projectId=${encodeURIComponent(p.id)}`);
           }}
           onCreate={() => openCreate()}
+          onNavigate={go}
         />
       ) : missingUrlProject ? (
         <div className="wb-card" style={{ padding: 28, textAlign: 'center' }}>
           <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>
-            {t('Project not found or no access', '项目不存在或当前账号无权访问')}
+            {t('Study not found or no access', '该研究不存在或当前账号无权访问')}
           </div>
           <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 14 }}>
             {t(
-              `Requested project ID "${urlProjectId}" is not in your accessible projects list. It may have been deleted or belong to another user.`,
-              `请求的 projectId「${urlProjectId}」不在当前账号可访问的项目列表中，可能已被删除或属于其他用户的私有项目。`,
+              'The requested study is not in your accessible studies list. It may have been deleted or belong to another account.',
+              '请求的研究不在当前账号可访问列表中，可能已被删除或属于其他成员的私有研究。',
             )}
           </div>
           <button type="button" className="ds-btn" onClick={() => go('/projects?view=list')}>
-            {t('Back to All Projects', '返回全部项目')}
+            {t('Back to All Studies', '返回全部研究')}
           </button>
         </div>
+      ) : activeView === 'summary' && selectedProject ? (
+        <ProjectSummaryView project={selectedProject} monitors={monitors} onNavigate={go} />
       ) : activeView === 'collect' && selectedProject ? (
-        <ProjectCollectView
-          key={selectedProject.id}
-          actor={actor}
-          project={selectedProject}
-          sources={sources}
-          initialSearch={initialSearchString}
-          onNavigate={go}
-        />
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div>
+            <button
+              type="button"
+              className="ds-btn ds-btn--ghost"
+              onClick={() => go(`/projects?view=batches&projectId=${encodeURIComponent(selectedProject.id)}`)}
+            >
+              <ArrowLeft size={13} />
+              <span>{t('Back to Research Materials', '返回研究资料')}</span>
+            </button>
+          </div>
+          <ProjectCollectView
+            key={selectedProject.id}
+            actor={actor}
+            project={selectedProject}
+            sources={sources}
+            initialSearch={initialSearchString}
+            onNavigate={go}
+          />
+        </div>
       ) : activeView === 'jobs' && selectedProject ? (
-        <ProjectJobsView
-          key={selectedProject.id}
-          actor={actor}
-          project={selectedProject}
-          quota={quotasSummaryQuery.data}
-          monitors={monitors}
-          jobId={searchParams.get('jobId') ?? undefined}
-          onNavigate={go}
-          onOpenAnalytics={(monitorId) =>
-            go(`/projects?view=intelligence&projectId=${encodeURIComponent(selectedProject.id)}&monitorId=${encodeURIComponent(monitorId)}`)
-          }
-        />
+        <div style={{ display: 'grid', gap: 16 }}>
+          <ReportSchedulesPanel projectId={selectedProject.id} onNavigate={go} />
+          <ProjectJobsView
+            key={selectedProject.id}
+            actor={actor}
+            project={selectedProject}
+            quota={quotasSummaryQuery.data}
+            monitors={monitors}
+            jobId={searchParams.get('jobId') ?? undefined}
+            onNavigate={go}
+            onOpenAnalytics={(monitorId) =>
+              go(`/projects?view=intelligence&projectId=${encodeURIComponent(selectedProject.id)}&monitorId=${encodeURIComponent(monitorId)}`)
+            }
+          />
+        </div>
       ) : activeView === 'batches' && selectedProject ? (
-        <ProjectBatchesView key={selectedProject.id} project={selectedProject} batchId={searchParams.get('batchId') ?? undefined} allProjects={projects} onNavigate={go} />
-      ) : activeView === 'intelligence' ? (
-        <IntelligenceAnalyticsView
-          monitors={monitors}
-          projectId={selectedProject?.id}
-          initialMonitorId={searchParams.get('monitorId') ?? undefined}
+        <ProjectMaterialsView
+          key={selectedProject.id}
+          project={selectedProject}
+          batchId={searchParams.get('batchId') ?? undefined}
+          initialShowAdd={searchParams.get('add') === '1'}
+          allProjects={projects}
           onNavigate={go}
-          onOpenContentDetail={handleOpenInlineDetail}
         />
+      ) : activeView === 'reports' && selectedProject ? (
+        <ProjectReportsTabView project={selectedProject} onNavigate={go} />
+      ) : activeView === 'intelligence' ? (
+        <div style={{ display: 'grid', gap: 12 }}>
+          {selectedProject && (
+            <div>
+              <button
+                type="button"
+                className="ds-btn ds-btn--ghost"
+                onClick={() => go(`/projects?view=jobs&projectId=${encodeURIComponent(selectedProject.id)}`)}
+              >
+                <ArrowLeft size={13} />
+                <span>{t('Back to Collection & Monitor', '返回采集与监测')}</span>
+              </button>
+            </div>
+          )}
+          <IntelligenceAnalyticsView
+            monitors={monitors}
+            projectId={selectedProject?.id}
+            initialMonitorId={searchParams.get('monitorId') ?? undefined}
+            onNavigate={go}
+            onOpenContentDetail={handleOpenInlineDetail}
+          />
+        </div>
       ) : (
         <>
-          {/* Empty State when no project exists yet */}
           {!projectsQuery.isLoading && !selectedProject && (
             <div className="ds-card" style={{ padding: 28, textAlign: 'center', marginBottom: 16 }}>
               <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 650, marginBottom: 6 }}>
-                {t('No Monitoring Projects Yet', '尚未创建监测项目')}
+                {t('No Research Studies Yet', '尚未创建研究')}
               </h3>
               <p style={{ fontSize: 12.5, color: 'var(--muted)', maxWidth: 520, margin: '0 auto 14px' }}>
                 {t(
-                  'Bind one or more sources with a fixed keyword lens to track daily trend anchors and pain-point cohorts.',
-                  '绑定一个或多个数据来源与固化检索词组，即可开启每日趋势锚点与痛点人群分析。',
+                  'Start by generating a research report or creating a dedicated study space.',
+                  '可以直接发起研究报告（系统将自动创建研究空间），或手动新建一项专题研究。',
                 )}
               </p>
-              {canWrite && (
-                <button type="button" className="ds-btn" onClick={() => openCreate()}>
-                  <Plus size={14} />
-                  <span>{t('Create First Project', '创建首个监测项目')}</span>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 8 }}>
+                <button type="button" className="ds-btn ds-btn--brand" onClick={() => go('/reports/new')}>
+                  <span>{t('Create Report', '发起研究报告')}</span>
                 </button>
-              )}
+                {canCreateProject && (
+                  <button type="button" className="ds-btn ds-btn--ghost" onClick={() => openCreate()}>
+                    <Plus size={14} />
+                    <span>{t('New Study', '新建研究')}</span>
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
           {selectedProject && (
-            <ContentResearchWorkspace
-              project={selectedProject}
-              initialLayer={
-                searchParams.get('layer') === 'l2'
-                  ? 'l2'
-                  : searchParams.get('layer') === 'l3'
-                    ? 'l3'
-                    : 'l1'
-              }
-              exportDisabled={exportDisabled}
-              onOpenContentDetail={handleOpenInlineDetail}
-              onNavigate={go}
-            />
+            <>
+              <ProjectAnalysisHubHeader
+                project={selectedProject}
+                onNavigate={go}
+                onDrilldown={onDrilldown}
+              />
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+                <ProjectEvidenceExport
+                  isAdmin={isAdmin}
+                  quota={quotasSummaryQuery}
+                  ready={contentQuery.isSuccess}
+                  content={rawItems}
+                  projectId={selectedProject.id}
+                  activeFilter={{
+                    from: windowFrom,
+                    to: windowTo,
+                    threadAware,
+                    deliveryMode: selectedProject.dataset_mode === 'source_filter' && !selectedProject.include_push_in_trends
+                      ? 'pull' : undefined,
+                  }}
+                />
+              </div>
+              <ContentResearchWorkspace
+                project={selectedProject}
+                initialLayer={
+                  searchParams.get('layer') === 'l2'
+                    ? 'l2'
+                    : searchParams.get('layer') === 'l3'
+                      ? 'l3'
+                      : 'l1'
+                }
+                exportDisabled={exportDisabled}
+                onOpenContentDetail={handleOpenInlineDetail}
+                onNavigate={go}
+              />
+            </>
           )}
         </>
       )}

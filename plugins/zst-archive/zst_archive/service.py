@@ -30,7 +30,21 @@ from .analytics import (
     resolve_study_evidence,
 )
 from .packages import discover_packages
-from .query import QuerySpec, select_archive_threads
+from .query import QuerySpec, discover_archive_fast, select_archive_threads
+
+_CATALOG_CACHE: tuple[float, Path, dict, list] | None = None
+_CATALOG_TTL_SECONDS = 30.0
+
+
+def _cached_catalog(root: Path):
+    global _CATALOG_CACHE
+    import time as _time
+    now = _time.monotonic()
+    if _CATALOG_CACHE is not None and _CATALOG_CACHE[1] == root and (now - _CATALOG_CACHE[0]) < _CATALOG_TTL_SECONDS:
+        return _CATALOG_CACHE[2], _CATALOG_CACHE[3]
+    result = _catalog(root)
+    _CATALOG_CACHE = (now, root, result[0], result[1])
+    return result
 
 ARCHIVE_ID = "reddit-local-corpus"
 MONTH = re.compile(r"[0-9]{4}-(?:0[1-9]|1[0-2])")
@@ -348,6 +362,18 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._handle_analytics(operation, data)
             return
+        if operation in {"discover", "discover/verify"}:
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 1 <= length <= MAX_BODY_BYTES:
+                    self._respond(413, {"code": "invalid_body_size"})
+                    return
+                data = json.loads(self.rfile.read(length))
+            except (ValueError, socket.timeout):
+                self._respond(400, {"code": "invalid_json"})
+                return
+            self._handle_discover(operation == "discover/verify", data)
+            return
         if operation not in {"preview", "search", "evidence"}:
             self._respond(404, {"code": "unknown_operation"})
             return
@@ -361,6 +387,52 @@ class Handler(BaseHTTPRequestHandler):
             self._respond(400, {"code": "invalid_json"})
             return
         self._respond(*self.server.run_query(operation, data))
+
+    def _handle_discover(self, verify_exact, data):
+        if not isinstance(data, dict):
+            self._respond(400, {"code": "invalid_request"})
+            return
+        if not self.server.slots.acquire(blocking=False):
+            self._respond(503, {"code": "archive_busy"})
+            return
+        try:
+            catalog, packages = _cached_catalog(self.server.root)
+            req_months = data.get("months")
+            selected = [pkg for pkg in packages if pkg.month in req_months] if isinstance(req_months, list) and req_months else packages
+            if not selected:
+                self._respond(409, {"code": "archive_month_unavailable"})
+                return
+            subreddits = tuple(str(s).lower() for s in (data.get("subreddits") or []) if isinstance(s, str) and SUBREDDIT.fullmatch(s))
+            with tempfile.TemporaryDirectory(prefix="r4-discover-") as temp:
+                duckdb_cfg = {**self.server.config, "temp_directory": Path(temp).as_posix()}
+                result = discover_archive_fast(
+                    selected,
+                    version=catalog["version"],
+                    query=str(data.get("query") or ""),
+                    subreddits=subreddits,
+                    from_iso=data.get("from") if isinstance(data.get("from"), str) else None,
+                    to_iso=data.get("to") if isinstance(data.get("to"), str) else None,
+                    verify_exact=verify_exact or bool(data.get("verifyExact", False)),
+                    include_samples=bool(data.get("includeSamples", True)),
+                    sample_limit=int(data.get("sampleLimit") or 5),
+                    include_comments_count=bool(data.get("includeCommentsCount", True)),
+                    config=duckdb_cfg,
+                )
+            self._respond(200, result)
+        except ServiceError as error:
+            self._respond(error.status, {"code": error.code})
+        except ValueError as error:
+            if "recall exceeded" in str(error):
+                self._respond(422, {"code": "recall_limit"})
+            else:
+                self._respond(400, {"code": "invalid_query"})
+        except duckdb.OutOfMemoryException:
+            self._respond(503, {"code": "query_resource_limit"})
+        except Exception as error:
+            logging.warning("Archive discover failed: %s", error)
+            self._respond(503, {"code": "query_worker_failed"})
+        finally:
+            self.server.slots.release()
 
     def _handle_analytics(self, operation, data):
         if not isinstance(data, dict):
@@ -383,7 +455,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._respond(200, result)
                 return
             # analyze/archive
-            catalog, packages = _catalog(self.server.root)
+            catalog, packages = _cached_catalog(self.server.root)
             req_months = data.get("months")
             selected = [pkg for pkg in packages if pkg.month in req_months] if isinstance(req_months, list) and req_months else packages
             if not selected:

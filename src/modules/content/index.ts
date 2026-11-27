@@ -61,4 +61,6 @@ export {
 export { commitContentBatch, prepareContentBatch } from "./sql";
 
 export { countSourceSamples, isWebArticlePullSource, listScopedContentIds } from "./queries";
+export { readStoryWindow, selectStoryFeed } from "./stories";
+export { computeStoryInsights } from "./story-insights";
 export type { BatchMembership, ContentVisibilityResolver } from "./search";
