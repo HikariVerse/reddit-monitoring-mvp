@@ -1,18 +1,29 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   AlertTriangle,
   ArrowDown,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  CheckCircle2,
+  BarChart3,
+  BookMarked,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
+  Compass,
   Database,
   FileSearch,
+  Flame,
+  Lightbulb,
+  MessageSquareQuote,
+  Newspaper,
   RefreshCw,
   Save,
+  ShieldCheck,
   Sparkles,
+  Tag,
+  TrendingUp,
+  Users,
 } from 'lucide-react';
 import {
   reportsApi,
@@ -42,6 +53,129 @@ const SOURCE_MODE_OPTIONS: Array<{ id: 'stories' | 'archive' | 'pg_content' | 'p
   { id: 'explore_study', label: '复用已有探索分析结果' },
   { id: 'monitor', label: '持续监测器窗口数据' },
 ];
+
+const TEMPLATE_VISUAL_META: Record<
+  ReportTemplateType,
+  { accent: string; tint: string; badge: string }
+> = {
+  industry: { accent: '#3c70a8', tint: '#eaf1fa', badge: '行业情报简报' },
+  commerce: { accent: '#287f75', tint: '#e6f3ef', badge: '电商市场研究' },
+  social: { accent: '#7463a5', tint: '#f0edf8', badge: '社媒舆情洞察' },
+  custom: { accent: '#a5773e', tint: '#f8f0e4', badge: '自定义研究报告' },
+};
+
+const WIZARD_STEPS = [
+  {
+    n: 1 as const,
+    code: '01',
+    title: '定义研究需求',
+    desc: '选定业务报告类型，输入核心研究对象、时间范围与关注重点。',
+    accent: '#3c70a8',
+    tint: '#eaf1fa',
+  },
+  {
+    n: 2 as const,
+    code: '02',
+    title: '自动发现资料与方案',
+    desc: '只读检索平台资讯、社区归档与项目资料，确认主数据源或按需补采。',
+    accent: '#287f75',
+    tint: '#e6f3ef',
+  },
+  {
+    n: 3 as const,
+    code: '03',
+    title: '确认目录并开始研究',
+    desc: '核对报告章节结构，一键自动分析、AI 核验撰写并支持离线 HTML 导出。',
+    accent: '#7463a5',
+    tint: '#f0edf8',
+  },
+];
+
+function WizardStepIllustration({ stepNum, accent }: { stepNum: 1 | 2 | 3; accent: string }) {
+  if (stepNum === 1) {
+    return (
+      <svg viewBox="0 0 48 48" className="rw-step-svg" aria-hidden="true">
+        <rect x="6" y="7" width="28" height="34" rx="5" fill="#ffffff" stroke={accent} strokeWidth="1.6" />
+        <rect x="12" y="13" width="16" height="3.2" rx="1.5" fill={accent} />
+        <rect x="12" y="20" width="14" height="2.4" rx="1.2" fill="#cbd5e1" />
+        <rect x="12" y="26" width="10" height="2.4" rx="1.2" fill="#cbd5e1" />
+        <circle cx="34" cy="32" r="9" fill={accent} />
+        <circle cx="34" cy="32" r="4" fill="none" stroke="#ffffff" strokeWidth="1.7" />
+        <circle cx="34" cy="32" r="1.4" fill="#ffffff" />
+      </svg>
+    );
+  }
+  if (stepNum === 2) {
+    return (
+      <svg viewBox="0 0 48 48" className="rw-step-svg" aria-hidden="true">
+        <circle cx="24" cy="24" r="17" fill="#ffffff" stroke={accent} strokeWidth="1.5" strokeDasharray="3 2.5" />
+        <circle cx="24" cy="24" r="9" fill={accent} opacity="0.16" />
+        <path d="M12 16 L24 24 L37 15 M24 24 L34 35" fill="none" stroke={accent} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="12" cy="16" r="3.6" fill={accent} />
+        <circle cx="37" cy="15" r="3.6" fill={accent} opacity="0.75" />
+        <circle cx="34" cy="35" r="3.6" fill={accent} opacity="0.85" />
+        <circle cx="24" cy="24" r="4.5" fill={accent} />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 48 48" className="rw-step-svg" aria-hidden="true">
+      <rect x="7" y="6" width="28" height="36" rx="5" fill="#ffffff" stroke={accent} strokeWidth="1.6" />
+      <rect x="7" y="6" width="28" height="5" rx="2.5" fill={accent} />
+      <rect x="12" y="16" width="18" height="3" rx="1.5" fill={accent} opacity="0.85" />
+      <rect x="12" y="23" width="14" height="3" rx="1.5" fill={accent} opacity="0.55" />
+      <rect x="12" y="30" width="16" height="3" rx="1.5" fill={accent} opacity="0.35" />
+      <circle cx="35" cy="33" r="8.5" fill={accent} />
+      <path d="M31.5 33.2 L33.8 35.5 L38.6 30.5" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+interface OutlineSectionMeta {
+  icon: typeof Sparkles;
+  roleLabel: string;
+  roleTone: 'exec' | 'data' | 'action' | 'proof';
+  shortHint: string;
+}
+
+function getOutlineSectionMeta(sectionId: string, fallbackDesc?: string): OutlineSectionMeta {
+  switch (sectionId) {
+    case 'executive_summary':
+      return { icon: Sparkles, roleLabel: '核心总览', roleTone: 'exec', shortHint: '一页速览研究结论与关键业务判断' };
+    case 'scope_overview':
+      return { icon: Compass, roleLabel: '必含口径', roleTone: 'proof', shortHint: '时间窗口、有效样本量与统计基准说明' };
+    case 'industry_events':
+      return { icon: Newspaper, roleLabel: '事件聚合', roleTone: 'data', shortHint: '跨来源去重后的重点动态与报道脉络' };
+    case 'industry_topics':
+      return { icon: Flame, roleLabel: '热词升温', roleTone: 'data', shortHint: '高频主题聚簇与前后窗口升温词追踪' };
+    case 'industry_trend':
+    case 'discussion_trend':
+      return { icon: TrendingUp, roleLabel: '趋势图表', roleTone: 'data', shortHint: '按时段呈现活跃度走势与来源结构' };
+    case 'community_audience':
+      return { icon: Users, roleLabel: '受众分布', roleTone: 'data', shortHint: '核心社区阵地、平台占比与互动热度' };
+    case 'lexical_features':
+    case 'topic_clusters':
+      return { icon: BarChart3, roleLabel: '语义聚类', roleTone: 'data', shortHint: '高区分度特征词与中文命名核心话题' };
+    case 'sentiment_reputation':
+      return { icon: MessageSquareQuote, roleLabel: '口碑态度', roleTone: 'data', shortHint: '正负情感结构、争议焦点与未判单列' };
+    case 'active_demand':
+    case 'pain_points':
+      return { icon: AlertTriangle, roleLabel: '需求痛点', roleTone: 'data', shortHint: '真实求推荐诉求、场景困扰与高频抱怨' };
+    case 'price_purchase':
+      return { icon: Tag, roleLabel: '价格决策', roleTone: 'data', shortHint: '价位区间关注度与购买链路阶段分布' };
+    case 'business_actions':
+      return { icon: Lightbulb, roleLabel: '行动建议', roleTone: 'action', shortHint: '分级可执行建议与后续核查验证清单' };
+    case 'sources_appendix':
+      return { icon: BookMarked, roleLabel: '原文溯源', roleTone: 'proof', shortHint: '数据范围快照与可点击核验的原文证据' };
+    default:
+      return {
+        icon: BarChart3,
+        roleLabel: '专题分析',
+        roleTone: 'data',
+        shortHint: fallbackDesc ? fallbackDesc.slice(0, 26) : '基于已授权样本的专项统计与解读',
+      };
+  }
+}
 
 export function ReportWizardView({
   search,
@@ -412,37 +546,77 @@ export function ReportWizardView({
         </div>
       </div>
 
-      {/* Stepper */}
-      <div className="ds-card" style={{ padding: '10px 16px', display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        {[
-          { n: 1 as const, label: '01 · 定义研究需求' },
-          { n: 2 as const, label: '02 · 自动发现资料与方案' },
-          { n: 3 as const, label: '03 · 确认目录并开始研究' },
-        ].map((item) => (
-          <button
-            key={item.n}
-            type="button"
-            className={`ds-btn ${step === item.n ? '' : 'ds-btn--quiet'}`}
-            style={{ fontSize: 12.5, fontWeight: step === item.n ? 700 : 500 }}
-            onClick={() => {
-              if (item.n < step || (item.n === 2 && discovery) || item.n === 1) setStep(item.n);
-            }}
-          >
-            {item.label}
-          </button>
-        ))}
-        {modulesQuery.data?.llm && (
-          <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted)' }}>
-            文字归纳引擎：{modulesQuery.data.llm.configured ? `已就绪 (${modulesQuery.data.llm.model})` : '未配置（将生成纯数据报告）'}
-          </span>
-        )}
-      </div>
+      {/* Horizontal 3-Step Visual Guide */}
+      <section className="ds-card rw-stepper-card" aria-label="创建研究报告步骤">
+        <div className="rw-stepper-head">
+          <div className="rw-stepper-head-left">
+            <span className="rw-stepper-eyebrow">三步完成研究报告</span>
+            <span className="rw-stepper-progress">当前进度：第 {step} / 3 步</span>
+          </div>
+          {modulesQuery.data?.llm && (
+            <span
+              className={`rw-llm-pill ${modulesQuery.data.llm.configured ? 'is-ready' : 'is-fallback'}`}
+              title={modulesQuery.data.llm.configured ? `模型：${modulesQuery.data.llm.model}` : '未配置模型密钥时自动交付纯数据统计报告'}
+            >
+              <span className="rw-llm-dot" aria-hidden="true" />
+              <span>
+                {modulesQuery.data.llm.configured
+                  ? 'AI 结论归纳引擎已就绪'
+                  : '纯数据统计模式（未配置 AI 引擎）'}
+              </span>
+            </span>
+          )}
+        </div>
+
+        <div className="rw-steps-row">
+          {WIZARD_STEPS.map((item, idx) => {
+            const isActive = step === item.n;
+            const isDone = step > item.n;
+            const canClick = item.n < step || (item.n === 2 && Boolean(discovery)) || item.n === 1;
+            return (
+              <div key={item.n} className="rw-step-slot">
+                <button
+                  type="button"
+                  className={`rw-step-card ${isActive ? 'is-active' : ''} ${isDone ? 'is-done' : ''}`}
+                  style={{ '--step-accent': item.accent, '--step-tint': item.tint } as CSSProperties}
+                  disabled={!canClick && !isActive}
+                  aria-current={isActive ? 'step' : undefined}
+                  onClick={() => {
+                    if (canClick) setStep(item.n);
+                  }}
+                >
+                  <div className="rw-step-illus" style={{ background: item.tint }}>
+                    <WizardStepIllustration stepNum={item.n} accent={item.accent} />
+                  </div>
+                  <div className="rw-step-copy">
+                    <div className="rw-step-top">
+                      <span className="rw-step-num" style={{ color: item.accent }}>
+                        {item.code}
+                      </span>
+                      <strong className="rw-step-title">{item.title}</strong>
+                      <span className={`rw-step-state ${isActive ? 'is-active' : isDone ? 'is-done' : ''}`}>
+                        {isDone ? '已完成' : isActive ? '进行中' : '待进行'}
+                      </span>
+                    </div>
+                    <p className="rw-step-desc">{item.desc}</p>
+                  </div>
+                </button>
+                {idx < WIZARD_STEPS.length - 1 && (
+                  <div className={`rw-step-arrow ${step > item.n ? 'is-passed' : ''}`} aria-hidden="true">
+                    <ChevronRight size={16} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
 
       {notice && <div className="wb-alert wb-alert--success">{notice}</div>}
       {submitErr && <div className="wb-alert wb-alert--error">{submitErr}</div>}
 
-      {/* Main 2-column Wizard Layout: Form + Sticky Outline */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 290px', gap: 16, alignItems: 'start' }}>
+      {/* Main 2-column Wizard Layout: Form + Visual Sticky Outline */}
+      <div className="rw-main-grid">
         {/* Left column: Step Content */}
         <div className="ds-card" style={{ padding: 20, display: 'grid', gap: 16 }}>
           {step === 1 && (
@@ -1094,31 +1268,79 @@ export function ReportWizardView({
           )}
         </div>
 
-        {/* Right column: Sticky Report Outline */}
-        <aside className="ds-card" style={{ padding: 16, position: 'sticky', top: 16, display: 'grid', gap: 10 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--muted)' }}>
-            REPORT OUTLINE · 预计报告目录
-          </div>
-          <div style={{ fontWeight: 700, fontSize: 14 }}>{effectiveTitle}</div>
-          <div style={{ fontSize: 11.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Database size={12} />
-            <span>{SOURCE_MODE_OPTIONS.find((s) => s.id === primarySource)?.label}</span>
-          </div>
-          <ol style={{ margin: 0, padding: '0 0 0 18px', display: 'grid', gap: 6, fontSize: 12.5 }}>
-            {selectedSections.map((sid) => {
-              const m = moduleMap.get(sid);
-              return (
-                <li key={sid} style={{ color: 'var(--ink)' }}>
-                  {m?.title ?? sid}
-                </li>
-              );
-            })}
-          </ol>
-          <div style={{ borderTop: '1px solid var(--line)', paddingTop: 8, fontSize: 11.5, color: 'var(--muted)', display: 'flex', gap: 6, alignItems: 'center' }}>
-            <CheckCircle2 size={13} color="var(--wb-purple-deep)" />
-            <span>统计与图表由程序生成，AI 仅基于已验证指标和代表原文撰写解读。</span>
-          </div>
-        </aside>
+        {/* Right column: Visual Structured Report Outline */}
+        {(() => {
+          const tplVis = TEMPLATE_VISUAL_META[template];
+          const sourceLabel = SOURCE_MODE_OPTIONS.find((s) => s.id === primarySource)?.label ?? '自动推荐主资料';
+          return (
+            <aside
+              className="ds-card rw-outline-card"
+              style={{ '--outline-accent': tplVis.accent, '--outline-tint': tplVis.tint } as CSSProperties}
+            >
+              {/* Scenario Banner Header with Mini Report SVG */}
+              <div className="rw-outline-banner">
+                <svg viewBox="0 0 42 50" className="rw-outline-thumb" aria-hidden="true">
+                  <rect x="3" y="2" width="36" height="46" rx="4" fill="#ffffff" stroke="#d5dde6" />
+                  <rect x="3" y="2" width="36" height="4" rx="2" fill={tplVis.accent} />
+                  <rect x="8" y="11" width="18" height="2.6" rx="1" fill={tplVis.accent} />
+                  <rect x="8" y="17" width="26" height="4" rx="1" fill="#334155" />
+                  <rect x="8" y="25" width="26" height="3.2" rx="1" fill={tplVis.accent} opacity="0.28" />
+                  <rect x="8" y="31" width="20" height="3.2" rx="1" fill={tplVis.accent} opacity="0.58" />
+                  <rect x="8" y="37" width="15" height="3.2" rx="1" fill={tplVis.accent} opacity="0.82" />
+                </svg>
+                <div className="rw-outline-banner-copy">
+                  <div className="rw-outline-eyebrow">
+                    <span>预计报告目录</span>
+                    <span className="rw-outline-count">共 {selectedSections.length} 章</span>
+                  </div>
+                  <div className="rw-outline-title">{effectiveTitle}</div>
+                  <div className="rw-outline-source">
+                    <Database size={11} />
+                    <span>{sourceLabel}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Structured Visual Chapter Timeline */}
+              <div className="rw-outline-body">
+                <ol className="rw-outline-list">
+                  {selectedSections.map((sid, idx) => {
+                    const mod = moduleMap.get(sid);
+                    const meta = getOutlineSectionMeta(sid, mod?.description);
+                    const Icon = meta.icon;
+                    return (
+                      <li key={sid} className="rw-outline-item">
+                        <div className="rw-outline-rail" aria-hidden="true">
+                          <span className={`rw-outline-node rw-outline-node--${meta.roleTone}`}>
+                            {String(idx + 1).padStart(2, '0')}
+                          </span>
+                          {idx < selectedSections.length - 1 && <span className="rw-outline-line" />}
+                        </div>
+                        <div className="rw-outline-item-card">
+                          <div className="rw-outline-item-top">
+                            <span className="rw-outline-item-title">
+                              <Icon size={13} color={tplVis.accent} />
+                              <span>{mod?.title ?? sid}</span>
+                            </span>
+                            <span className={`rw-outline-role rw-outline-role--${meta.roleTone}`}>
+                              {meta.roleLabel}
+                            </span>
+                          </div>
+                          <div className="rw-outline-item-hint">{meta.shortHint}</div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+
+                <div className="rw-outline-footer">
+                  <ShieldCheck size={14} color={tplVis.accent} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span>统计与图表由程序基于真实样本生成，AI 仅依据已验证指标与代表原文撰写解读。</span>
+                </div>
+              </div>
+            </aside>
+          );
+        })()}
       </div>
     </div>
   );
