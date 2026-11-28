@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import {
   ArrowRight,
   BookOpen,
@@ -6,12 +6,11 @@ import {
   Compass,
   FileBarChart,
   FolderKanban,
-  Newspaper,
+  MessageCircleMore,
   Search,
   ShoppingBag,
   SlidersHorizontal,
   Sparkles,
-  TrendingUp,
 } from 'lucide-react';
 import {
   useReportDraftsQuery,
@@ -22,31 +21,39 @@ import {
 import { useProjectsQuery } from '../../api/hooks';
 import { useI18n } from '../../i18n/translations';
 
-const TEMPLATE_CARDS: Array<{
+interface TemplateCardSpec {
   id: ReportTemplateType;
   titleZh: string;
   titleEn: string;
   badgeZh: string;
   descZh: string;
-  outputZh: string;
-  icon: typeof Newspaper;
-}> = [
+  tagsZh: string;
+  accent: string;
+  tint: string;
+  icon: typeof BookOpen;
+}
+
+const TEMPLATE_CARDS: TemplateCardSpec[] = [
   {
     id: 'industry',
     titleZh: '行业情报简报',
     titleEn: 'Industry Intelligence Briefing',
     badgeZh: '资讯多源印证',
-    descZh: '面向行业动态、科技与 AI 发布跟踪，聚合去重事件、主题与热词升温。',
-    outputZh: '核心摘要 · 重点事件 · 主题动态 · 资讯趋势 · 业务启示',
-    icon: Newspaper,
+    descZh: '把分散的资讯整理成重点事件、行业动态与业务启示。',
+    tagsZh: '日报 · 周报 · 专题简报',
+    accent: '#3c70a8',
+    tint: '#eaf1fa',
+    icon: BookOpen,
   },
   {
     id: 'commerce',
     titleZh: '电商市场研究',
     titleEn: 'E-Commerce Market Research',
     badgeZh: '消费者需求与痛点',
-    descZh: '面向跨境选品、品类机会与产品迭代，挖掘主动需求、痛点、口碑与价格带。',
-    outputZh: '样本概况 · 讨论趋势 · 主动需求 · 产品痛点 · 口碑与价格',
+    descZh: '洞察消费者需求、产品痛点、价格关注与购买行为。',
+    tagsZh: '消费者洞察 · 产品研究 · 竞品观察',
+    accent: '#287f75',
+    tint: '#e6f3ef',
     icon: ShoppingBag,
   },
   {
@@ -54,20 +61,90 @@ const TEMPLATE_CARDS: Array<{
     titleZh: '社媒舆情洞察',
     titleEn: 'Social Listening & Sentiment',
     badgeZh: '趋势与事件异常',
-    descZh: '面向品牌声量、话题演化与突发事件复盘，识别异常峰值、社区分布与观点争议。',
-    outputZh: '规模趋势 · 社区互动 · 核心话题 · 异常事件 · 情感口碑',
-    icon: TrendingUp,
+    descZh: '梳理讨论趋势、主要话题、观点结构与异常事件。',
+    tagsZh: '品牌口碑 · 热点事件 · 话题研究',
+    accent: '#7463a5',
+    tint: '#f0edf8',
+    icon: MessageCircleMore,
   },
   {
     id: 'custom',
     titleZh: '自定义研究报告',
     titleEn: 'Custom Research Report',
     badgeZh: '自由编排模块',
-    descZh: '按研究问题自由勾选、排序全部可用分析模块，或基于已有探索结果快速成稿。',
-    outputZh: '研究范围（固定）· 自选统计/语义/对比模块 · 证据索引',
+    descZh: '选择研究数据，自由组合章节、图表与 AI 研究重点。',
+    tagsZh: '已有分析结果 · 自由组合',
+    accent: '#a5773e',
+    tint: '#f8f0e4',
     icon: SlidersHorizontal,
   },
 ];
+
+function TemplateMiniSvg({ template, accent }: { template: ReportTemplateType; accent: string }) {
+  return (
+    <svg viewBox="0 0 110 130" aria-hidden="true" className="wb-tpl-svg">
+      <rect x="8" y="3" width="94" height="124" rx="4" fill="#ffffff" stroke="#d8e0e8" />
+      <rect x="8" y="3" width="94" height="4" rx="2" fill={accent} />
+      <rect x="19" y="15" width="44" height="3" rx="1" fill={accent} />
+      <rect x="19" y="23" width="70" height="7" rx="1" fill="#34465a" />
+      <rect x="19" y="35" width="47" height="2" rx="1" fill="#c8d2de" />
+
+      {template === 'industry' && (
+        <>
+          {[0, 1, 2].map((i) => (
+            <g key={i}>
+              <rect x="19" y={47 + i * 23} width="22" height="16" rx="2" fill={accent} opacity="0.19" />
+              <rect x="47" y={48 + i * 23} width="40" height="3" rx="1" fill={accent} opacity="0.82" />
+              <path d={`M47 ${55 + i * 23}h44m-44 5h31`} stroke="#ccd5e0" strokeWidth="1.4" />
+            </g>
+          ))}
+        </>
+      )}
+
+      {template === 'social' && (
+        <>
+          <path d="M19 82h74M19 66h74M19 50h74" stroke="#e0e5ec" strokeWidth="1" />
+          <path
+            d="M19 78 31 71 43 74 55 49 67 65 79 43 91 59"
+            fill="none"
+            stroke={accent}
+            strokeWidth="2.1"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <circle cx="34" cy="104" r="12" fill="none" stroke="#dce0e6" strokeWidth="7" />
+          <circle
+            cx="34"
+            cy="104"
+            r="12"
+            fill="none"
+            stroke={accent}
+            strokeWidth="7"
+            strokeDasharray="45 76"
+          />
+          <path d="M55 96h33m-33 8h27m-27 8h35" stroke="#c9d2dd" strokeWidth="3" strokeLinecap="round" />
+        </>
+      )}
+
+      {(template === 'commerce' || template === 'custom') && (
+        <>
+          <g fill={accent} opacity="0.18">
+            <rect x="19" y="44" width="22" height="14" rx="2" />
+            <rect x="44" y="44" width="22" height="14" rx="2" />
+            <rect x="69" y="44" width="22" height="14" rx="2" />
+          </g>
+          {[59, 43, 36, 25].map((w, i) => (
+            <g key={i}>
+              <rect x="19" y={67 + i * 9} width="72" height="5" rx="1" fill="#e7edf1" />
+              <rect x="19" y={67 + i * 9} width={w} height="5" rx="1" fill={accent} opacity="0.78" />
+            </g>
+          ))}
+          <path d="M19 109h72m-72 5h56" stroke="#cdd5df" strokeWidth="1.4" />
+        </>
+      )}
+    </svg>
+  );
+}
 
 const QUICK_CHIPS = [
   { label: '开放式耳机消费者需求', template: 'commerce' as const },
@@ -86,7 +163,7 @@ function inferTemplateFromQuestion(text: string): ReportTemplateType {
 export function ReportWorkbenchView({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { t } = useI18n();
   const [question, setQuestion] = useState('');
-  const reportsQuery = useReportsListQuery({ limit: 6 }, true);
+  const reportsQuery = useReportsListQuery({ limit: 20 }, true);
   const runsQuery = useReportRunsQuery({ limit: 6 }, true);
   const draftsQuery = useReportDraftsQuery(true);
   const projectsQuery = useProjectsQuery(true);
@@ -95,6 +172,13 @@ export function ReportWorkbenchView({ onNavigate }: { onNavigate: (path: string)
   const runs = runsQuery.data?.runs ?? [];
   const drafts = draftsQuery.data?.drafts ?? [];
   const projects = projectsQuery.data?.projects ?? [];
+
+  const latestReportByTemplate = new Map<ReportTemplateType, (typeof reports)[number]>();
+  for (const rep of reports) {
+    if (!latestReportByTemplate.has(rep.template)) {
+      latestReportByTemplate.set(rep.template, rep);
+    }
+  }
 
   const activeRun = runs.find((r) => ['preparing', 'collecting', 'analyzing', 'writing', 'needs_action'].includes(r.state));
   const latestDraft = drafts[0];
@@ -227,38 +311,61 @@ export function ReportWorkbenchView({ onNavigate }: { onNavigate: (path: string)
       )}
 
       {/* Four Business Templates */}
-      <section style={{ display: 'grid', gap: 10 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>选择业务场景</h2>
-          <span style={{ fontSize: 12, color: 'var(--muted)' }}>所有报告基于真实已授权数据与可溯源原文生成</span>
+      <section style={{ display: 'grid', gap: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <h2 style={{ fontSize: 15.5, fontWeight: 700, margin: 0 }}>选择业务场景</h2>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>三类预设模板 · 自定义研究（基于真实已授权数据与可溯源原文）</span>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 12 }}>
+        <div className="wb-tpl-grid">
           {TEMPLATE_CARDS.map((card) => {
             const Icon = card.icon;
+            const latestRep = latestReportByTemplate.get(card.id);
             return (
-              <div key={card.id} className="ds-card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Icon size={17} color="var(--wb-purple-deep)" />
-                    <b style={{ fontSize: 14 }}>{card.titleZh}</b>
+              <article
+                key={card.id}
+                className="ds-card wb-tpl-card"
+                style={{ '--tpl-accent': card.accent, '--tpl-tint': card.tint } as CSSProperties}
+              >
+                <button
+                  type="button"
+                  className="wb-tpl-preview"
+                  onClick={() =>
+                    onNavigate(latestRep ? `/reports/${encodeURIComponent(latestRep.id)}` : `/reports/new?template=${card.id}`)
+                  }
+                  title={latestRep ? `查看最近一份${card.titleZh}：${latestRep.title}` : `使用${card.titleZh}模板开始研究`}
+                >
+                  <TemplateMiniSvg template={card.id} accent={card.accent} />
+                </button>
+                <div className="wb-tpl-body">
+                  <h3 className="wb-tpl-title">
+                    <Icon size={16} color={card.accent} />
+                    <span>{card.titleZh}</span>
+                  </h3>
+                  <p className="wb-tpl-desc">{card.descZh}</p>
+                  <div className="wb-tpl-tags">{card.tagsZh}</div>
+                  <div className="wb-tpl-actions">
+                    {latestRep ? (
+                      <button
+                        type="button"
+                        className="wb-tpl-link"
+                        onClick={() => onNavigate(`/reports/${encodeURIComponent(latestRep.id)}`)}
+                      >
+                        查看最近成稿
+                      </button>
+                    ) : (
+                      <span className="wb-tpl-badge">{card.badgeZh}</span>
+                    )}
+                    <button
+                      type="button"
+                      className="ds-btn ds-btn--ghost wb-tpl-cta"
+                      onClick={() => onNavigate(`/reports/new?template=${card.id}`)}
+                    >
+                      <span>使用模板</span>
+                      <ArrowRight size={13} />
+                    </button>
                   </div>
-                  <span className="tag" style={{ fontSize: 10.5 }}>{card.badgeZh}</span>
                 </div>
-                <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0, lineHeight: 1.55 }}>{card.descZh}</p>
-                <div style={{ fontSize: 11.5, color: 'var(--ink-3)', background: '#f8fafc', padding: '7px 9px', borderRadius: 6, border: '1px solid var(--line)' }}>
-                  默认章节：{card.outputZh}
-                </div>
-                <div style={{ marginTop: 'auto', display: 'flex', gap: 8, paddingTop: 4 }}>
-                  <button
-                    type="button"
-                    className="ds-btn"
-                    style={{ flex: 1 }}
-                    onClick={() => onNavigate(`/reports/new?template=${card.id}`)}
-                  >
-                    使用模板
-                  </button>
-                </div>
-              </div>
+              </article>
             );
           })}
         </div>
@@ -282,7 +389,7 @@ export function ReportWorkbenchView({ onNavigate }: { onNavigate: (path: string)
             </div>
           ) : (
             <div style={{ display: 'grid', gap: 8 }}>
-              {reports.map((rep) => (
+              {reports.slice(0, 5).map((rep) => (
                 <div
                   key={rep.id}
                   style={{
