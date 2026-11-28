@@ -3,7 +3,7 @@
 from dataclasses import asdict, dataclass
 
 
-VERSION = "first-batch/1.0"
+VERSION = "v2-commercial/2.0"
 STATES = ("ready", "exploratory", "insufficient_data", "unsupported_source",
           "missing_fields", "unavailable_dependency", "running", "failed")
 
@@ -55,16 +55,26 @@ SELECTED = {c.id: c for c in (
     _metric("PR24", "价格关注与语境", "price", "money_and_price_clause_attention", "documents", "focus", "documents denominator rate facts roles"),
     _metric("MI24", "价格分布", "price", "separate_currency_period_target_amount_role", "price_mentions", "focus", "facts cohort_keys cohorts omitted_mentions"),
     _metric("MI28", "购买决策阶段", "price", "descriptive_grounded_multilabel_purchase_stage", "documents", "focus", "stages denominator overlap_possible"),
+    # Phase 2 Commercial Intelligence Metrics (S2-02: 5 bridged + S2-03: 6 decision-grade + S2-06: MI13)
+    _metric("PR01", "品类讨论规模", "commercial", "category_scale_with_kind_split", "documents", "focus kind", "documents posts comments threads authors days"),
+    _metric("MI03", "每百万归档关注度", "commercial", "archive_population_per_million", "threads/M", "retrieval_census archive_ledger", "threads_per_million numerator denominator rate days"),
+    _metric("MI05", "品牌声量排行", "commercial", "normalized_brand_alias_voice", "documents", "focus", "brands discovered_candidates total_brand_mentions denominator"),
+    _metric("MI06", "样本品牌声量份额", "commercial", "additive_brand_share_of_voice", "ratio", "focus", "brands total_brand_mentions sum_sov_share unbranded_documents unbranded_rate"),
+    _metric("MI07", "品牌提及覆盖率", "commercial", "brand_mention_coverage_rate", "ratio", "focus", "covered_documents unmatched_documents denominator coverage_rate unmatched_rate"),
+    _metric("MI14", "直接竞品比较关系", "commercial", "same_sentence_brand_comparison_and_switch", "edges", "focus", "pairs total_comparison_documents total_edges"),
+    _metric("MI13", "品牌共提关联网络", "commercial", "document_brand_cooccurrence_lift_npmi", "edges", "focus", "edges total_edges denominator"),
+    _metric("PR07", "品类属性负面率", "commercial", "clause_attribute_negative_rate", "ratio", "focus", "attributes denominator formula"),
+    _metric("MI19", "品牌×属性情感矩阵", "commercial", "clause_target_attribute_sentiment_matrix", "cells", "focus", "brands attributes cells denominator"),
+    _metric("SL08", "净情感指数", "commercial", "signed_net_sentiment_index", "ratio", "focus", "net_sentiment positive negative denominator by_brand by_day"),
+    _metric("PR13", "使用场景需求分布", "commercial", "multilabel_scenario_and_active_demand", "documents", "focus", "scenarios covered_documents denominator"),
+    _metric("OD16", "用户变通方案", "commercial", "structured_workaround_and_diy_extraction", "documents", "focus", "documents rate categories cases"),
 )}
 
 
-CONDITIONAL = {c.id: c for c in (
-    _metric("MI05", "已验证品牌声量", "entities", "verified_domain_role_mentions", "documents", "verified_domain_entities", "entities"),
-    _metric("MI07", "已验证品牌覆盖率", "entities", "verified_domain_role_coverage", "ratio", "verified_domain_entities", "entities covered_documents denominator rate"),
-)}
+CONDITIONAL = {}
 
 
-ALIASES = {"PR01": "SL01", "MI03": "SL02", "PR07": "SL09"}
+ALIASES = {}
 
 
 @dataclass(frozen=True)
@@ -84,10 +94,12 @@ PANELS = {
     "P06": Panel("主题时间分布", ("SR24", "SR25"), "calendar / heatmap", ("dates", "groups", "sources")),
     "P07": Panel("声量异常与事件", ("SL04", "SL15"), "line / expandable table", ("dates", "groups", "sources")),
     "P08": Panel("生命周期", ("SL17", "SL30"), "timeline / table", ("dates", "groups", "sources")),
-    "P09": Panel("情感与口碑", ("SL07", "SL09"), "stacked bar / line", ("dates", "groups", "sources")),
+    "P09": Panel("情感与口碑", ("SL07", "SL09", "SL08"), "stacked bar / line", ("dates", "groups", "sources")),
     "P10": Panel("主动需求与显式诉求", ("PR02", "PR03", "OD03", "OD04"), "bar / cards", ("dates", "groups", "sources")),
     "P11": Panel("未满足需求与痛点", ("OD05", "OD06", "OD30"), "table / bar", ("dates", "groups", "sources")),
     "P12": Panel("价格与购买决策", ("PR24", "MI24", "MI28"), "histogram / table", ("dates", "groups", "sources")),
+    "P13": Panel("品牌格局与竞品比较", ("MI05", "MI06", "MI07", "MI14", "MI13"), "bar / table", ("dates", "groups", "sources")),
+    "P14": Panel("品牌属性口碑、场景与变通", ("PR07", "MI19", "PR13", "OD16", "PR01", "MI03"), "heatmap / bar / table", ("dates", "groups", "sources")),
 }
 
 

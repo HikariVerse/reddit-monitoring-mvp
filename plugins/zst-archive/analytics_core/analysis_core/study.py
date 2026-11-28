@@ -53,6 +53,56 @@ def as_text(value):
     return str(value) if pd.notna(value) else ""
 
 
+import re
+
+_CODING_SEEDS = {"cursor", "windsurf", "claude", "codex", "agent", "coding", "ide", "copilot"}
+_MOUSE_NOISE_RE = re.compile(
+    r"\b(?:mouse|mouse cursor|cursor (?:speed|size|blink|block|beam|shape|disappear\w*|stuck|flicker\w*|invisible|lag\w*|moves?|moving|position|icon|arrow|jumps?|jumping|freez\w*|drifts?)|"
+    r"move (?:the |my )?cursor|number key cursor|normal mode and a beam|trackpad|touchpad|pointer|crosshair|gamepad|joystick|controller|"
+    r"hover(?:ing)?|left[- ]?click|right[- ]?click|middle[- ]?click|dpi|logitech|razer|screen edge|second monitor|dual monitor)\b",
+    re.I,
+)
+_CODING_CTX_RE = re.compile(
+    r"\b(?:ai|llm|agent|claude|gpt|openai|anthropic|windsurf|copilot|codebase|prompt|coding|ide|tabnine|vscode|vs code|repo|pull request|token|mcp|composer|sonnet|opus|deepseek|gemini|typescript|python|refactor\w*)\b",
+    re.I,
+)
+_POWER_SEEDS = {"ecoflow", "jackery", "bluetti", "power", "station", "portable", "solar"}
+_GRID_WAR_NOISE_RE = re.compile(
+    r"\b(?:nuclear (?:power|plant|waste|reactor)|ukraine|ukrainian|russia|russian|missile|drone strike|coal[- ]fired|hydroelectric|power plant|substation)\b",
+    re.I,
+)
+_PORTABLE_POWER_CTX_RE = re.compile(
+    r"\b(?:portable|ecoflow|jackery|bluetti|anker|delta|river|explorer|ac70|ac200|lifepo4|camping|vanlife|cpap|inverter|solar panel|watt[- ]?hour|wh\b)\b",
+    re.I,
+)
+_AUDIO_SEEDS = {"shokz", "openfit", "openrun", "aerofit", "earbuds", "headphones", "ear"}
+_DATING_TRADING_NOISE_RE = re.compile(
+    r"\b(?:\d{2}\s*\[[mf]4[mfa]\]|m4f|f4m|r4r|trade for other|trading card)\b",
+    re.I,
+)
+_GEMINI_SEEDS = {"gemini"}
+_ZODIAC_NOISE_RE = re.compile(
+    r"\b(?:horoscope|zodiac|astrology|aries|taurus|scorpio|aquarius|pisces|virgo|libra|sagittarius|capricorn|birth chart|rising sign)\b",
+    re.I,
+)
+
+
+def _polysemy_exclusion_reason(norm: str, seeds: tuple[str, ...]) -> str | None:
+    """General domain-context polysemy guard (S1-05): filters clear cross-domain collisions transparently."""
+    if not seeds:
+        return None
+    seed_set = {s.lower().strip('"\'() ') for s in seeds}
+    if (seed_set & _CODING_SEEDS) and _MOUSE_NOISE_RE.search(norm) and not _CODING_CTX_RE.search(norm):
+        return "polysemy_mouse_cursor"
+    if (seed_set & _POWER_SEEDS) and _GRID_WAR_NOISE_RE.search(norm) and not _PORTABLE_POWER_CTX_RE.search(norm):
+        return "polysemy_utility_grid"
+    if (seed_set & _AUDIO_SEEDS) and _DATING_TRADING_NOISE_RE.search(norm):
+        return "polysemy_offtopic_personal"
+    if (seed_set & _GEMINI_SEEDS) and _ZODIAC_NOISE_RE.search(norm) and not _CODING_CTX_RE.search(norm):
+        return "polysemy_zodiac"
+    return None
+
+
 def _plain_admission(texts):
     normalized = relevance.normalize_batch(texts)
     return [(norm, {"focus": norm, "method": "provided_scope", "focus_coordinates": [
@@ -121,8 +171,14 @@ class Study:
         args = (config.seeds,) if config.seeds else ()
         batches = ordered_map(relevance.admit_batch if args else _plain_admission, texts, *args, label="selected_relevance")
         candidates = []
+        polysemy_excluded = Counter()
         for index, (norm, admitted) in enumerate(pair for batch in batches for pair in batch):
             row = rows[index]
+            excl = _polysemy_exclusion_reason(norm, config.seeds)
+            if excl:
+                polysemy_excluded[excl] += 1
+                row.update(norm=norm, focus="", admission=f"excluded:{excl}", focus_coordinates=())
+                continue
             row.update(norm=norm, focus=admitted["focus"], admission=admitted["method"],
                        focus_coordinates=admitted.get("focus_coordinates", ()))
             if row["focus"] and len(norm) >= config.min_chars:

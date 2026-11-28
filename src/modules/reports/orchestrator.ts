@@ -544,6 +544,7 @@ export async function executeReportRun(
           to: plan.to ?? null,
           platforms: plan.platforms?.length ? plan.platforms : undefined,
           profile: plan.profile ?? "fast",
+          accelMode: plan.accelMode,
           includeComments: Boolean(plan.includeComments),
           limit: plan.sampleLimit ?? 2000,
         });

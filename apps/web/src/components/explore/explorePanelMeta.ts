@@ -48,6 +48,14 @@ export const EXPLORE_SCENARIO_LIST: readonly ExploreScenarioMeta[] = [
     descZh: '深入拆解观点情感与正负口碑、主动需求与功能请求、痛点簇、价格关注带与购买阶段。',
     panels: ['P09', 'P10', 'P11', 'P12'],
   },
+  {
+    id: 'commercial',
+    titleEn: 'Brands, Competition & Scenarios',
+    titleZh: '商业竞品、属性口碑与场景',
+    descEn: 'Compare brand SOV, direct competitor switches, brand × attribute sentiment matrix, scenarios, and workarounds.',
+    descZh: '拆解品牌声量与份额（MI05/06/07）、直接竞品比较（MI14）、品牌×属性口碑热力（MI19/PR07）、使用场景需求（PR13）与用户变通方案（OD16）。',
+    panels: ['P13', 'P14'],
+  },
 ];
 
 export interface ExplorePanelMeta {
@@ -231,6 +239,36 @@ export const EXPLORE_PANEL_META: Record<ExplorePanelId, ExplorePanelMeta> = {
     fieldGlossary: [
       { field: 'cohort (MI24)', meaning: '按币种与计费周期（如 USD/month）独立分列的金额区间，不跨币种混算' },
       { field: 'stages (MI28)', meaning: '需求、调研、对比、预算、购买意向、已购、使用与退货等多标签阶段（可重叠）' },
+    ],
+  },
+  P13: {
+    id: 'P13',
+    scenario: 'commercial',
+    titleEn: 'Brand Landscape & Direct Competition',
+    titleZh: '品牌格局与竞品比较（P13）',
+    subtitleEn: 'Normalized brand voice & SOV (MI05/MI06/MI07), direct comparisons (MI14), and co-occurrence Lift (MI13).',
+    subtitleZh: '归一品牌别名计算声量排行（MI05）、加总为 100% 的品牌份额（MI06）、提及覆盖率（MI07）以及同句直接竞品对比/切换（MI14）与共提网络（MI13）。',
+    priority: 99,
+    defaultSpan: 'full',
+    fieldGlossary: [
+      { field: 'sov_share (MI06)', meaning: '品牌去重提及数 / 全部已识别品牌提及总数（严格加总为 100%）' },
+      { field: 'coverage_rate (MI07)', meaning: '至少提及 1 个已识别品牌的文档占全部有效样本比例；未命中不等于未决定购买' },
+      { field: 'MI14 vs MI13', meaning: 'MI14 严格抽取同句直接比较/切换/替代关系，与 MI13 文档共提网络分层展示' },
+    ],
+  },
+  P14: {
+    id: 'P14',
+    scenario: 'commercial',
+    titleEn: 'Brand × Attribute Matrix, Scenarios & Workarounds',
+    titleZh: '品牌属性口碑、场景需求与变通机会（P14）',
+    subtitleEn: 'Clause-bound brand × attribute sentiment (MI19), attribute negative rate (PR07), scenarios (PR13), and workarounds (OD16).',
+    subtitleZh: '基于分句目标归属构建品牌×属性情感热力矩阵（MI19）与属性负面率（PR07），并拆解使用场景主动需求（PR13）与用户变通/自制方案（OD16）。',
+    priority: 97,
+    defaultSpan: 'full',
+    fieldGlossary: [
+      { field: 'net_sentiment (SL08/MI19)', meaning: '(正面 - 负面) / (正面 + 负面)，范围 [-1, +1]；低支持量单元格自动标注' },
+      { field: 'negative_rate (PR07)', meaning: '属性级负面评价 / 同属性明确正负评价，仅统计具备明确极性的属性句段' },
+      { field: 'PR13 / OD16', meaning: '区分场景提及与场景内明确需求；抽取问题—变通做法—结果的用户自制/替代方案' },
     ],
   },
 };

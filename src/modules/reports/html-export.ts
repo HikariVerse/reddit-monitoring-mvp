@@ -72,6 +72,65 @@ function renderOfflineSvgChart(chart: ReportChartSpec): string {
     return `<div class="table-wrap"><table class="sortable-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
+  if (chart.kind === "heatmap" && chart.heatmap && chart.heatmap.xLabels.length > 0 && chart.heatmap.yLabels.length > 0) {
+    const hm = chart.heatmap;
+    const cols = hm.xLabels.slice(0, 10);
+    const rows = hm.yLabels.slice(0, 10);
+    const valMap = new Map<string, number>();
+    let hasNeg = false;
+    let maxAbs = 1;
+    for (const [xi, yi, v] of hm.values) {
+      valMap.set(`${xi}:${yi}`, v);
+      if (v < 0) hasNeg = true;
+      if (Math.abs(v) > maxAbs) maxAbs = Math.abs(v);
+    }
+    const padL = 112;
+    const padT = 36;
+    const cellW = Math.max(54, Math.min(78, Math.floor((660 - padL) / Math.max(1, cols.length))));
+    const cellH = 30;
+    const W = padL + cols.length * cellW + 18;
+    const H = padT + rows.length * cellH + 16;
+
+    const colorFor = (v: number): string => {
+      if (hasNeg) {
+        if (v >= 0.45) return "#0f766e";
+        if (v >= 0.15) return "#5eead4";
+        if (v > -0.15) return "#f1f5f9";
+        if (v > -0.45) return "#fca5a5";
+        return "#dc2626";
+      }
+      const ratio = Math.min(1, Math.max(0, v / maxAbs));
+      return ratio > 0.66 ? "#0f766e" : ratio > 0.33 ? "#5eead4" : "#e2f5f2";
+    };
+
+    const colHeads = cols
+      .map((c, ci) => `<text x="${padL + ci * cellW + cellW / 2}" y="22" text-anchor="middle" font-size="10.5" class="svg-lbl">${esc(c.length > 7 ? c.slice(0, 6) + "…" : c)}</text>`)
+      .join("");
+    const cellMarkup: string[] = [];
+    for (let ri = 0; ri < rows.length; ri++) {
+      const y = padT + ri * cellH;
+      cellMarkup.push(`<text x="${padL - 8}" y="${y + 19}" text-anchor="end" font-size="11" class="svg-lbl">${esc(rows[ri].length > 13 ? rows[ri].slice(0, 12) + "…" : rows[ri])}</text>`);
+      for (let ci = 0; ci < cols.length; ci++) {
+        const x = padL + ci * cellW;
+        const v = valMap.get(`${ci}:${ri}`);
+        if (v === undefined) {
+          cellMarkup.push(`<rect x="${x + 2}" y="${y + 2}" width="${cellW - 4}" height="${cellH - 4}" rx="4" fill="#f8fafc" stroke="#e2e8f0" stroke-width="0.6" />`);
+          cellMarkup.push(`<text x="${x + cellW / 2}" y="${y + 19}" text-anchor="middle" font-size="10" fill="#94a3b8">—</text>`);
+        } else {
+          const bg = colorFor(v);
+          const fg = (hasNeg && Math.abs(v) >= 0.45) || (!hasNeg && v / maxAbs > 0.66) ? "#ffffff" : "#0f172a";
+          const txt = hasNeg ? (v >= 0 ? `+${v.toFixed(2)}` : v.toFixed(2)) : String(v);
+          cellMarkup.push(
+            `<g class="svg-bar-row" data-tip-title="${esc(rows[ri])} × ${esc(cols[ci])}" data-tip-val="${esc(txt)} ${esc(chart.unit)}" data-tip-sub="${esc(chart.subtitle || chart.title)}">` +
+            `<rect x="${x + 2}" y="${y + 2}" width="${cellW - 4}" height="${cellH - 4}" rx="4" fill="${bg}" />` +
+            `<text x="${x + cellW / 2}" y="${y + 19}" text-anchor="middle" font-size="10.5" font-weight="600" fill="${fg}" pointer-events="none">${esc(txt)}</text></g>`,
+          );
+        }
+      }
+    }
+    return `<svg viewBox="0 0 ${W} ${H}" class="offline-svg" role="img" aria-label="${esc(chart.title)}">${colHeads}${cellMarkup.join("")}</svg>`;
+  }
+
   const labels = chart.xLabels ?? [];
   const primary = chart.series?.[0];
   if (!labels.length || !primary || !primary.data.length) {
@@ -251,9 +310,21 @@ export function renderStandaloneReportHtml(doc: {
             .join("")}</div>`
         : "";
 
+      const resolveChartLabels = (ch: ReportChartSpec): ReportChartSpec => {
+        if (ch.id !== "C_P05_TOPICS" || !sec.narrative?.topicLabels?.length || !ch.xLabels?.length) return ch;
+        const byGroup = new Map(sec.narrative.topicLabels.map((tl) => [tl.groupId, tl.label]));
+        const nextLabels = ch.xLabels.map((raw, i) => {
+          if (raw.startsWith("其他零散讨论")) return raw;
+          const exact = byGroup.get(raw) ?? byGroup.get(`T${i + 1}`) ?? sec.narrative?.topicLabels?.[i]?.label;
+          return exact && exact.trim() ? exact.trim() : raw;
+        });
+        return { ...ch, xLabels: nextLabels };
+      };
+
       const charts = sec.charts
-        .map(
-          (ch) => `<div class="chart-card">
+        .map((rawCh) => {
+          const ch = resolveChartLabels(rawCh);
+          return `<div class="chart-card">
             <div class="chart-hd">
               <div>
                 <strong>${esc(ch.title)}</strong>
@@ -262,8 +333,8 @@ export function renderStandaloneReportHtml(doc: {
               ${ch.evidenceIds?.length ? `<button type="button" class="mini-btn" data-open-ev="${esc(ch.evidenceIds.join(","))}" data-ev-title="${esc(ch.title)}">查看关联证据 (${ch.evidenceIds.length})</button>` : ""}
             </div>
             ${renderOfflineSvgChart(ch)}
-          </div>`,
-        )
+          </div>`;
+        })
         .join("");
 
       const findings = sec.narrative?.findings?.length

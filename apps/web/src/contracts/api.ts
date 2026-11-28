@@ -560,6 +560,10 @@ export interface ProjectDataSummary {
   shared_batch_count: number;
   private_batch_count: number;
   latest_batch_at: string | null;
+  archive_ref_count?: number;
+  report_count?: number;
+  latest_report_analyzed_count?: number;
+  latest_report_source_kind?: string | null;
 }
 
 export interface Project {

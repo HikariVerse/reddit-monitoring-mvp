@@ -13,6 +13,71 @@ export function ReportChartRenderer({
 }) {
   const option = useMemo<EChartOption | null>(() => {
     if (chart.kind === 'table') return null;
+
+    if (chart.kind === 'heatmap' && chart.heatmap && chart.heatmap.xLabels.length > 0 && chart.heatmap.yLabels.length > 0) {
+      const hm = chart.heatmap;
+      const vals = hm.values.map((v) => v[2]);
+      const hasNeg = vals.some((v) => v < 0);
+      const minVal = hasNeg ? -1 : 0;
+      const maxVal = hasNeg ? 1 : Math.max(1, ...vals);
+      return {
+        tooltip: {
+          position: 'top',
+          formatter: (p: unknown) => {
+            const d = (p as { data?: [number, number, number] })?.data;
+            if (!d) return '';
+            const xl = hm.xLabels[d[0]] ?? '';
+            const yl = hm.yLabels[d[1]] ?? '';
+            const valFmt = hasNeg ? (d[2] >= 0 ? `+${d[2].toFixed(2)}` : d[2].toFixed(2)) : String(d[2]);
+            return `${yl} × ${xl}<br/><strong>${valFmt}</strong> ${chart.unit}`;
+          },
+        },
+        grid: { left: 112, right: 24, top: 18, bottom: 78 },
+        xAxis: {
+          type: 'category',
+          data: hm.xLabels,
+          splitArea: { show: true },
+          axisLabel: { fontSize: 10.5, color: '#334155', rotate: hm.xLabels.length > 4 ? 28 : 0 },
+        },
+        yAxis: {
+          type: 'category',
+          data: hm.yLabels,
+          splitArea: { show: true },
+          axisLabel: { fontSize: 11, color: '#334155', width: 98, overflow: 'truncate' },
+        },
+        visualMap: {
+          min: minVal,
+          max: maxVal,
+          calculable: false,
+          orient: 'horizontal',
+          left: 'center',
+          bottom: 2,
+          itemHeight: 90,
+          itemWidth: 10,
+          textStyle: { fontSize: 10, color: '#64748b' },
+          inRange: hasNeg
+            ? { color: ['#dc2626', '#fca5a5', '#f8fafc', '#6ee7b7', '#0f766e'] }
+            : { color: ['#f8fafc', '#99f6e4', '#0f766e'] },
+        },
+        series: [{
+          name: chart.title,
+          type: 'heatmap',
+          data: hm.values,
+          label: {
+            show: true,
+            fontSize: 10,
+            color: '#0f172a',
+            formatter: (p: unknown) => {
+              const d = (p as { data?: [number, number, number] })?.data;
+              if (!d) return '';
+              return hasNeg ? (d[2] >= 0 ? `+${d[2].toFixed(2)}` : d[2].toFixed(2)) : String(d[2]);
+            },
+          },
+          emphasis: { itemStyle: { shadowBlur: 6, shadowColor: 'rgba(15, 23, 42, 0.25)' } },
+        }],
+      };
+    }
+
     if (!chart.xLabels?.length || !chart.series?.length) return null;
 
     if (chart.kind === 'horizontal_bar') {
@@ -129,7 +194,13 @@ export function ReportChartRenderer({
         >
           <EChartBox
             option={option}
-            height={chart.kind === 'horizontal_bar' ? Math.max(210, Math.min(360, chart.xLabels.length * 28 + 44)) : 240}
+            height={
+              chart.kind === 'horizontal_bar'
+                ? Math.max(210, Math.min(360, chart.xLabels.length * 28 + 44))
+                : chart.kind === 'heatmap'
+                  ? Math.max(270, Math.min(380, (chart.heatmap?.yLabels.length ?? 6) * 32 + 96))
+                  : 240
+            }
           />
         </div>
       ) : (

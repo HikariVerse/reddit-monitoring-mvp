@@ -105,7 +105,7 @@ function readConfig(): ArchiveConfig {
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password ||
         url.pathname !== "/" || url.search || url.hash ||
         !token || !/^[!-~]{32,}$/.test(token) ||
-        !Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 65_000) {
+        !Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 300_000) {
       return { enabled, sourceId, timeoutMs };
     }
     return { enabled, sourceId, url, token, timeoutMs };

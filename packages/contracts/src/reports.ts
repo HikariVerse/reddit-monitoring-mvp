@@ -111,6 +111,7 @@ export const ReportRunCreateInput = Type.Object(
     monitorId: Type.Optional(Type.Union([Id, Type.Null()])),
     sampleLimit: Type.Optional(Type.Integer({ minimum: 25, maximum: 10000 })),
     profile: Type.Optional(Type.Union([Type.Literal("fast"), Type.Literal("balanced")])),
+    accelMode: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("auto"), Type.Literal("prefer_gpu")])),
     includeComments: Type.Optional(Type.Boolean()),
     sections: Type.Optional(Type.Array(Type.String({ maxLength: 64 }), { maxItems: 32 })),
     collectionAction: Type.Optional(

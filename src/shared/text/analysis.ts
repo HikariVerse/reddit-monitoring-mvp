@@ -23,6 +23,7 @@ const EN_STOPWORDS = new Set([
   "way", "we", "well", "were", "what", "when", "where", "which", "while", "who", "whom", "why", "will",
   "with", "won", "would", "you", "your", "yours", "yourself", "yourselves", "also", "even", "much",
   "https", "http", "www", "com", "org", "reddit", "amp", "gt", "lt", "nbsp", "quot",
+  "url", "urls", "link", "links",
   "read", "comments", "comment", "points", "article", "show", "ask", "via", "post", "posts", "today",
 ]);
 
@@ -151,6 +152,8 @@ export interface CleanTokenOptions {
 }
 
 const BOILERPLATE_STRIP_PATTERNS: readonly RegExp[] = [
+  /(?:^|\s)(?:Article|Comments)\s+URL\s*:\s*\S*/gi,
+  /(?:^|\s)(?:Points|#\s*Comments)\s*:\s*\d+/gi,
   /\b(?:read more|continue reading|click here|learn more|subscribe now|sign up)\b[^.!?\n]*/gi,
   /\bsubmitted by\b\s*(?:\/?u\/[a-z0-9_-]+)?/gi,
   /\b(?:posted by|originally published at)\b[^.!?\n]*/gi,
@@ -160,6 +163,9 @@ const BOILERPLATE_STRIP_PATTERNS: readonly RegExp[] = [
 export function cleanTextForAnalysis(raw: string | null | undefined, stripBoilerplate = false): string {
   if (!raw) return "";
   let text = stripHtmlToPlainText(raw)
+    // Always strip Hacker News / RSS structured metadata lines before URL & token extraction
+    .replace(/(?:^|\s)(?:Article|Comments)\s+URL\s*:\s*\S*/gi, " ")
+    .replace(/(?:^|\s)(?:Points|#\s*Comments)\s*:\s*\d+/gi, " ")
     // Convert markdown links [label](url) -> label
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/gi, " $1 ")
     // Strip raw URLs

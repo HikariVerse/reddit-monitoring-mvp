@@ -14,11 +14,20 @@ from typing import Any
 from .packages import MonthPackage
 from .query import QuerySpec, select_archive_for_analysis
 
-MAX_ARCHIVE_ANALYSIS_DOCS = 10000
-MAX_STUDY_CACHE = 4
-MAX_RESULT_CACHE = 8
-MAX_PROGRESS_CACHE = 32
-PANEL_IDS = ("P01", "P02", "P03", "P04", "P05", "P06", "P07", "P08", "P09", "P10", "P11", "P12")
+def _host_ram_gb() -> float:
+    try:
+        import psutil
+        return psutil.virtual_memory().total / (1024 ** 3)
+    except Exception:
+        return 4.0
+
+
+_HIGH_RAM = _host_ram_gb() >= 16.0
+MAX_ARCHIVE_ANALYSIS_DOCS = int(os.environ.get("ARCHIVE_MAX_ANALYSIS_DOCS") or (15000 if _HIGH_RAM else 10000))
+MAX_STUDY_CACHE = int(os.environ.get("ARCHIVE_MAX_STUDY_CACHE") or (16 if _HIGH_RAM else 4))
+MAX_RESULT_CACHE = int(os.environ.get("ARCHIVE_MAX_RESULT_CACHE") or (32 if _HIGH_RAM else 8))
+MAX_PROGRESS_CACHE = 64
+PANEL_IDS = ("P01", "P02", "P03", "P04", "P05", "P06", "P07", "P08", "P09", "P10", "P11", "P12", "P13", "P14")
 PANEL_TITLES = {
     "P01": "讨论规模与覆盖",
     "P02": "语料去重与质量",
@@ -32,6 +41,8 @@ PANEL_TITLES = {
     "P10": "主动需求与显式诉求",
     "P11": "需求与痛点聚类",
     "P12": "价格与购买决策",
+    "P13": "品牌格局与竞品比较",
+    "P14": "品牌属性口碑、场景与变通",
 }
 
 _CORE_DIR = Path(__file__).resolve().parent.parent / "analytics_core"
@@ -88,18 +99,22 @@ def _ensure_core_path() -> None:
 
 
 def analytics_runtime_status() -> dict[str, Any]:
-    """Report whether the optional potion-analysis-core dependencies and Potion model are ready."""
+    """Honest runtime probe: real spacy.load('en_core_web_sm') + real ONNX CPU/GPU & VRAM status."""
     _ensure_core_path()
     try:
         import analysis_core  # noqa: F401
         deps_ok = True
     except Exception:
         deps_ok = False
+    v2_info: dict[str, Any] = {}
+    balanced_ok = False
     try:
-        import spacy  # noqa: F401
+        import v2_runtime
+
+        v2_info = v2_runtime.runtime_health()
         import vaderSentiment  # noqa: F401
         import jieba  # noqa: F401
-        balanced_ok = True
+        balanced_ok = bool(v2_info.get("spacyEnReady"))
     except Exception:
         balanced_ok = False
     model_dir = _resolve_model_dir()
@@ -108,7 +123,26 @@ def analytics_runtime_status() -> dict[str, Any]:
         "potionModelReady": bool(model_dir),
         "balancedReady": balanced_ok,
         "panels": list(PANEL_IDS),
+        "v2Runtime": v2_info,
     }
+
+
+def warmup_runtime(packages: list[MonthPackage] | None = None) -> None:
+    """Background warmup of Potion encoder, V2 ONNX sentiment session, and DuckDB parquet metadata."""
+    try:
+        _get_encoder()
+        _ensure_core_path()
+        import v2_runtime
+
+        v2_runtime.probe_spacy_en()
+        v2_runtime.get_sentiment_model()
+        if packages:
+            from research.populations import parquet_thread_total
+
+            for pkg in packages[:6]:
+                parquet_thread_total((pkg.posts_parquet.as_posix(), "warmup"), pkg.month, ())
+    except Exception:
+        pass
 
 
 def _resolve_model_dir() -> Path | None:
@@ -139,7 +173,9 @@ def _get_encoder() -> Any:
             _ensure_core_path()
             from model_runtime import PotionINT8Encoder
 
-            _ENCODER = PotionINT8Encoder(str(model_dir))
+            eager = os.environ.get("POTION_EAGER_DEQUANT", "auto").strip().lower()
+            use_eager = _HIGH_RAM if eager == "auto" else eager in ("1", "true", "yes")
+            _ENCODER = PotionINT8Encoder(str(model_dir), eager_dequant=use_eager)
         except Exception:
             _ENCODER = None
         return _ENCODER
@@ -203,7 +239,9 @@ def analyze_documents_payload(payload: dict[str, Any]) -> dict[str, Any]:
     _update_progress(run_id, stage="ingesting", stageLabel=f"已载入 {len(raw_docs)} 条授权文档，正在清洗与去重", percent=20, rawDocuments=len(raw_docs))
     data_version = str(payload.get("dataVersion") or "explore-v1")
     seeds = tuple(str(s).strip() for s in (payload.get("seeds") or []) if str(s).strip())
-    profile = payload.get("profile") if payload.get("profile") in ("fast", "balanced") else "fast"
+    profile = payload.get("profile") if payload.get("profile") in ("fast", "balanced", "standard", "deep") else "fast"
+    accel_mode = payload.get("accelMode") if isinstance(payload.get("accelMode"), str) else None
+    use_v2_sent = bool(payload.get("useV2Sentiment", True))
     group_by = payload.get("groupBy") if payload.get("groupBy") in ("group", "source", "dataset", "kind", "language") else "group"
     coverage_days = payload.get("coverageDays") if isinstance(payload.get("coverageDays"), dict) else None
     requested_panels = payload.get("panels")
@@ -234,7 +272,7 @@ def analyze_documents_payload(payload: dict[str, Any]) -> dict[str, Any]:
             )
         )
 
-    config = Config(seeds=seeds, profile=profile, group_by=group_by)
+    config = Config(seeds=seeds, profile=profile, group_by=group_by, accel_mode=accel_mode, use_v2_sentiment=use_v2_sent)
     study = Study.ingest(docs, data_version=data_version, config=config, coverage_days=coverage_days, encoder=_get_encoder())
     _update_progress(run_id, stage="computing_panels", stageLabel=f"去重完成（保留 {len(study.core)} 条有效样本），开始计算分析面板", percent=30, rawDocuments=len(docs), analyzedDocuments=len(study.core))
     panels = _run_panels(study, panel_ids, run_id=run_id)
@@ -330,12 +368,16 @@ def analyze_archive_scope(
     limit: int,
     duckdb_config: dict[str, Any],
     run_id: str | None = None,
+    accel_mode: str | None = None,
+    use_v2_sentiment: bool = True,
 ) -> dict[str, Any]:
-    """Query open-corpus-v1 via DuckDB + FTS5 and run first-batch analytics over matched documents."""
+    """Query open-corpus-v1 via DuckDB + FTS5 and run V2 analytics over matched documents."""
     t0 = time.perf_counter()
     _ensure_core_path()
     from analysis_core import Config, InputDocument, Study
+    import v2_runtime
 
+    eff_accel = v2_runtime.get_accel_mode(accel_mode)
     cache_key = json.dumps(
         [
             version[:16],
@@ -348,6 +390,8 @@ def analyze_archive_scope(
             group_by,
             profile,
             limit,
+            eff_accel,
+            use_v2_sentiment,
         ],
         ensure_ascii=False,
     )
@@ -465,8 +509,14 @@ def analyze_archive_scope(
     )
     merged_coverage = {**ledger_coverage, **coverage_days}
     resolved_group = group_by if group_by in ("group", "source", "dataset", "kind", "language") else "group"
-    resolved_profile = profile if profile in ("fast", "balanced") else "fast"
-    config = Config(seeds=seeds, profile=resolved_profile, group_by=resolved_group)
+    resolved_profile = profile if profile in ("fast", "balanced", "standard", "deep") else "fast"
+    config = Config(
+        seeds=seeds,
+        profile=resolved_profile,
+        group_by=resolved_group,
+        accel_mode=accel_mode,
+        use_v2_sentiment=use_v2_sentiment,
+    )
     study = Study.ingest(
         docs,
         data_version=f"archive:{version[:16]}",

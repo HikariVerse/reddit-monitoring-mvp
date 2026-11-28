@@ -372,8 +372,8 @@ export function ReportWorkbenchView({ onNavigate }: { onNavigate: (path: string)
       </section>
 
       {/* Recent Reports & Recent Projects */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 14 }}>
-        <section className="ds-card" style={{ padding: 16, display: 'grid', gap: 10, alignContent: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: 14 }}>
+        <section className="ds-card" style={{ padding: 16, display: 'grid', gap: 10, alignContent: 'start', minWidth: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
               <FileBarChart size={15} color="var(--wb-purple-deep)" />
@@ -424,7 +424,7 @@ export function ReportWorkbenchView({ onNavigate }: { onNavigate: (path: string)
           )}
         </section>
 
-        <section className="ds-card" style={{ padding: 16, display: 'grid', gap: 10, alignContent: 'start' }}>
+        <section className="ds-card" style={{ padding: 16, display: 'grid', gap: 10, alignContent: 'start', minWidth: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
               <FolderKanban size={15} color="var(--wb-purple-deep)" />
@@ -458,7 +458,14 @@ export function ReportWorkbenchView({ onNavigate }: { onNavigate: (path: string)
                       {p.name}
                     </div>
                     <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2 }}>
-                      {p.is_shared ? '共享研究' : '私有研究'} · {p.data_summary?.item_count ?? 0} 条资料 · {p.enabled_batch_count} 个启用批次
+                      {p.is_shared ? '共享研究' : '私有研究'} ·{' '}
+                      {(p.data_summary?.item_count ?? 0) > 0
+                        ? `${(p.data_summary?.item_count ?? 0).toLocaleString()} 条项目样本 · ${p.enabled_batch_count} 个启用批次`
+                        : (p.data_summary?.latest_report_analyzed_count ?? 0) > 0
+                          ? `${p.data_summary?.archive_ref_count || p.data_summary?.latest_report_source_kind === 'archive' ? '历史归档' : p.data_summary?.latest_report_source_kind === 'stories' ? '行业资讯' : '研究快照'} · 已分析 ${(p.data_summary?.latest_report_analyzed_count ?? 0).toLocaleString()} 条`
+                          : (p.data_summary?.archive_ref_count ?? 0) > 0
+                            ? `已关联 ${p.data_summary?.archive_ref_count} 个历史归档范围`
+                            : `${p.enabled_batch_count} 个启用批次`}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>

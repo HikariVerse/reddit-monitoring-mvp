@@ -59,9 +59,52 @@ def _cluster_passages(vectors, texts, *, k, enhanced, defer_naming):
         if enhanced:
             repeat = MiniBatchKMeans(n_clusters=count, random_state=19, n_init=3, batch_size=256).fit_predict(fit_vectors)
             stability = float(adjusted_rand_score(labels[fit], repeat))
+
+    # S1-11: Post-process clusters:
+    # 1. Reassign tiny outlier clusters (< min_cluster_docs) to noise (-1) when n >= 60 so 1-doc outliers never pollute core topics
+    # 2. Merge near-duplicate clusters when centroid cosine >= 0.88 or top-2 lexical terms are identical
+    labels = np.asarray(labels, dtype=int).copy()
+    merged_pairs = []
+    min_cluster_docs = max(3, int(n * 0.005)) if n >= 60 else 1
+    unique_ids = sorted(set(int(x) for x in labels) - {-1})
+    if min_cluster_docs > 1 and len(unique_ids) > 2:
+        for cid in list(unique_ids):
+            if int((labels == cid).sum()) < min_cluster_docs:
+                labels[labels == cid] = -1
+        unique_ids = sorted(set(int(x) for x in labels) - {-1})
+
+    if len(unique_ids) >= 2:
+        prelim_names = class_terms(texts, labels)
+        centroids = {}
+        sizes = {}
+        for cid in unique_ids:
+            mask = labels == cid
+            sizes[cid] = int(mask.sum())
+            cvec = vectors[mask].mean(axis=0)
+            cvec = cvec / max(1e-9, float(np.linalg.norm(cvec)))
+            centroids[cid] = cvec
+        # Merge smaller duplicate cluster into larger cluster deterministically
+        ordered_ids = sorted(unique_ids, key=lambda cid: (-sizes[cid], cid))
+        absorbed = set()
+        for i_idx, keep_id in enumerate(ordered_ids):
+            if keep_id in absorbed:
+                continue
+            keep_terms = [t["term"] for t in prelim_names.get(keep_id, ())[:3]]
+            for drop_id in ordered_ids[i_idx + 1:]:
+                if drop_id in absorbed:
+                    continue
+                drop_terms = [t["term"] for t in prelim_names.get(drop_id, ())[:3]]
+                cos_sim = float(centroids[keep_id] @ centroids[drop_id])
+                same_top2 = len(keep_terms) >= 2 and len(drop_terms) >= 2 and set(keep_terms[:2]) == set(drop_terms[:2])
+                overlap = len(set(keep_terms) & set(drop_terms))
+                if same_top2 or (cos_sim >= 0.88 and overlap >= 1) or cos_sim >= 0.93:
+                    labels[labels == drop_id] = keep_id
+                    absorbed.add(drop_id)
+                    merged_pairs.append({"kept": keep_id, "merged": drop_id, "cosine": round(cos_sim, 3)})
+
     names = {} if defer_naming else class_terms(texts, labels)
     quality = {"method": method, "naming": "class_tfidf", "fit_rows": len(fit), "noise_share": float((labels < 0).mean()),
-               "stability_ari": stability, "similarity_floor": similarity_floor}
+               "stability_ari": stability, "similarity_floor": similarity_floor, "merged_duplicates": len(merged_pairs)}
     return labels, names, quality
 
 

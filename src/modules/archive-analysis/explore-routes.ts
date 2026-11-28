@@ -194,11 +194,13 @@ async function fetchPythonProgress(bridge: ExploreArchiveBridge, runId: string):
   }
 }
 
-async function checkPythonWorkerHealth(bridge: ExploreArchiveBridge): Promise<WorkerHealth> {
+async function checkPythonWorkerHealth(
+  bridge: ExploreArchiveBridge,
+): Promise<WorkerHealth & { balancedReady?: boolean; v2Runtime?: Record<string, unknown> }> {
   if (!bridge.enabled || !bridge.url || !bridge.token) {
-    return { pythonWorkerReady: false, potionModelReady: false };
+    return { pythonWorkerReady: false, potionModelReady: false, balancedReady: false };
   }
-  const signal = AbortSignal.timeout(Math.min(bridge.timeoutMs, 2500));
+  const signal = AbortSignal.timeout(Math.min(bridge.timeoutMs, 4000));
   try {
     const res = await fetch(new URL("health", bridge.url), {
       method: "GET",
@@ -206,14 +208,23 @@ async function checkPythonWorkerHealth(bridge: ExploreArchiveBridge): Promise<Wo
       signal,
       headers: { authorization: "Bearer " + bridge.token },
     });
-    if (!res.ok) return { pythonWorkerReady: false, potionModelReady: false };
-    const body = (await res.json()) as { analytics?: { available?: boolean; potionModelReady?: boolean } };
+    if (!res.ok) return { pythonWorkerReady: false, potionModelReady: false, balancedReady: false };
+    const body = (await res.json()) as {
+      analytics?: {
+        available?: boolean;
+        potionModelReady?: boolean;
+        balancedReady?: boolean;
+        v2Runtime?: Record<string, unknown>;
+      };
+    };
     return {
       pythonWorkerReady: Boolean(body.analytics?.available),
       potionModelReady: Boolean(body.analytics?.potionModelReady),
+      balancedReady: Boolean(body.analytics?.balancedReady),
+      v2Runtime: body.analytics?.v2Runtime,
     };
   } catch {
-    return { pythonWorkerReady: false, potionModelReady: false };
+    return { pythonWorkerReady: false, potionModelReady: false, balancedReady: false };
   }
 }
 
@@ -224,7 +235,7 @@ async function callPythonWorker<T>(
 ): Promise<T> {
   if (!bridge.enabled) fail(503, "archive_disabled");
   if (!bridge.url || !bridge.token) fail(503, "archive_unconfigured");
-  const timeout = Math.max(bridge.timeoutMs, 120_000);
+  const timeout = Math.max(bridge.timeoutMs, 240_000);
   const signal = AbortSignal.timeout(timeout);
   try {
     const res = await fetch(new URL(path, bridge.url), {
@@ -548,7 +559,7 @@ export async function executeExploreAnalysis(
   const profile = body.profile ?? "fast";
   const limit = body.limit ?? DEFAULT_EXPLORE_LIMIT;
   const scopeHash = createHash("sha256")
-    .update(JSON.stringify([actor.userId, body.sourceMode, body.projectId ?? null, body.archiveRefId ?? null, body.query.trim(), body.subreddits ?? [], body.from ?? null, body.to ?? null, body.platforms ?? [], groupBy, profile, Boolean(body.includeComments), limit]))
+    .update(JSON.stringify([actor.userId, body.sourceMode, body.projectId ?? null, body.archiveRefId ?? null, body.query.trim(), body.subreddits ?? [], body.from ?? null, body.to ?? null, body.platforms ?? [], groupBy, profile, body.accelMode ?? "auto", body.useV2Sentiment ?? true, Boolean(body.includeComments), limit]))
     .digest("hex");
 
   setLocalProgress(runId, actor.userId, {
@@ -579,7 +590,8 @@ export async function executeExploreAnalysis(
 
   if (body.sourceMode === "archive") {
     if (!archiveStatus.available) {
-      fail(503, archiveStatus.state || "archive_offline");
+      const httpCode = archiveStatus.state === "archive_forbidden" ? 403 : 503;
+      fail(httpCode, archiveStatus.state || "archive_offline");
     }
     let months = archiveStatus.months;
     let query = body.query.trim();
@@ -614,6 +626,8 @@ export async function executeExploreAnalysis(
       includeComments: Boolean(body.includeComments),
       groupBy,
       profile,
+      accelMode: body.accelMode,
+      useV2Sentiment: body.useV2Sentiment,
       limit,
     });
     const panels = attachScenarios(workerResult.panels);
@@ -685,6 +699,8 @@ export async function executeExploreAnalysis(
         seeds,
         groupBy,
         profile,
+        accelMode: body.accelMode,
+        useV2Sentiment: body.useV2Sentiment,
       });
       const panels = attachScenarios(workerResult.panels);
       const sourceProfile = summarizeSourceProfile(
@@ -792,6 +808,8 @@ export function registerExploreRoutes(app: FastifyInstance, pool: Pool, bridge: 
         archiveMonths: archiveStatus.months,
         pythonWorkerReady: workerHealth.pythonWorkerReady,
         potionModelReady: workerHealth.potionModelReady,
+        balancedReady: workerHealth.balancedReady,
+        v2Runtime: workerHealth.v2Runtime,
         liveContentCounts: { total, infoStream, reddit, x, bluesky },
         scenarios: EXPLORE_SCENARIOS,
       };

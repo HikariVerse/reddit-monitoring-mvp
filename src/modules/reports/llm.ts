@@ -108,8 +108,8 @@ const SHARED_SYSTEM_PROMPT = [
   "   - title 必须是「带观点的短标题」（10–20 字，如「快充与低温衰减成为高赞核心痛点」），禁止写空泛标题（如「痛点分析」「讨论趋势」）。",
   "   - text 严格采用「量化事实 + 原声/场景佐证 + 业务含义」结构（60–140 字），尽量点出原文中的具体品牌、型号、价格区间或典型场景，语言自然克制、无废话。",
   "   - 合理区分 kind：observation（客观数据/原声事实）、interpretation（深层原因解读）、hypothesis（待进一步验证的判断）、recommendation（可落地行动建议）。",
-  "3. 严格真实与可追溯：所有数字必须来自输入数据；只允许引用输入中真实存在的 scopeIds、metricIds、evidenceIds；不得虚构链接、品牌、事件或统计值；无充分证据时诚实说明边界。",
-  "4. 话题命名：当本节为 topic_clusters 时，请在 topicLabels 中为每个话题簇给出直观的中文业务命名（4–10 字）。",
+  "3. 严格真实与可追溯：所有数字必须来自输入数据；只允许引用输入中真实存在的 scopeIds、metricIds、evidenceIds；不得虚构链接、品牌、事件或统计值；无充分证据时诚实说明边界。严禁在 summary、heading、title 或 text 正文中直接输出内部变量名或算子编号（如 M_PHRASES、M_DOCS、SL01、SR08、PR24、R4 DuckDB），一律改写为自然中文业务表达。",
+  "4. 话题命名：当本节为 topic_clusters 时，请在 topicLabels 中按图表 xLabels 顺序为每个核心话题簇给出直观的中文业务命名（4–10 字），groupId 严格填写对应的原始 xLabels 字符串。",
   '严格输出纯 JSON 对象，禁止 Markdown 代码围栏、HTML、脚本或多余字段。格式：{"sectionId":"...","heading":"...","summary":"...","findings":[{"title":"...","text":"...","kind":"observation|interpretation|hypothesis|recommendation","scopeIds":["..."],"metricIds":["..."],"evidenceIds":["..."]}],"topicLabels":[{"groupId":"...","label":"...","evidenceIds":["..."]}],"limitations":["..."]}',
 ].join("\n");
 
@@ -132,6 +132,10 @@ function sanitizeText(raw: unknown, maxLen = 1200): string {
     .replace(/<\s*script[\s\S]*?<\s*\/\s*script\s*>/gi, "")
     .replace(/javascript:/gi, "")
     .replace(/<[^>]+>/g, " ")
+    // Prevent leaked internal metric variable tokens (e.g. M_PHRASES=0) from appearing in user-facing prose
+    .replace(/\bM_[A-Z0-9_]+\s*=\s*[-+]?\d+(?:\.\d+)?%?/g, "")
+    .replace(/\(\s*M_[A-Z0-9_]+\s*\)/g, "")
+    .replace(/\bM_[A-Z0-9_]+\b/g, "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, maxLen);
@@ -432,6 +436,15 @@ export async function synthesizeSectionNarrative(params: {
         unit: c.unit,
         xLabels: c.xLabels.slice(0, 20),
         series: c.series.slice(0, 4).map((s) => ({ name: s.name, data: s.data.slice(0, 20) })),
+        ...(c.heatmap
+          ? {
+              heatmapCells: c.heatmap.values.slice(0, 28).map(([xi, yi, v]) => ({
+                brand: c.heatmap!.yLabels[yi],
+                attribute: c.heatmap!.xLabels[xi],
+                value: v,
+              })),
+            }
+          : {}),
         tableRows: c.table?.rows.slice(0, 12),
       })),
       warnings: params.section.warnings,
@@ -462,7 +475,13 @@ export async function synthesizeSectionNarrative(params: {
     allowedEvidenceIds: new Set(sectionEvidence.map((e) => e.id)),
   };
 
-  const systemContent = `${SHARED_SYSTEM_PROMPT}\n${TEMPLATE_GUIDANCE[params.template]}`;
+  const commercialGuard =
+    params.section.id === "brand_competition" ||
+    params.section.id === "brand_attribute_matrix" ||
+    params.section.id === "scenario_workaround"
+      ? "\n商业分析补充纪律：1) 样本品牌份额不等同于真实市场销量份额，未匹配品牌不得推断为未决定购买；2) 直接竞品对比(MI14)与文档共提(MI13)严格区分；3) 品牌×属性热力低支持单元格必须提示样本有限；4) 产品/机会建议须使用「可验证线索」「建议后续验证」等审慎表述，严禁杜撰市场潜力百分比。"
+      : "";
+  const systemContent = `${SHARED_SYSTEM_PROMPT}\n${TEMPLATE_GUIDANCE[params.template]}${commercialGuard}`;
   const messages: Array<{ role: "system" | "user"; content: string }> = [
     { role: "system", content: systemContent },
     { role: "user", content: userJson },

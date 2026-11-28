@@ -141,6 +141,8 @@ export function ExplorePanelCard({
   const [p06Tab, setP06Tab] = useState<'weekhour' | 'calendar'>('weekhour');
   const [p11Tab, setP11Tab] = useState<'pain' | 'need'>('pain');
   const [p12Tab, setP12Tab] = useState<'stages' | 'prices'>('stages');
+  const [p13Tab, setP13Tab] = useState<'sov' | 'compare' | 'cooccur'>('sov');
+  const [p14Tab, setP14Tab] = useState<'matrix' | 'attr' | 'scenario' | 'workaround'>('matrix');
 
   const glossaryNotes = useMemo(
     () => meta.fieldGlossary.map((g) => `${g.field}：${g.meaning}`),
@@ -846,65 +848,324 @@ export function ExplorePanelCard({
     }
 
     // P12: Price & Purchase Stages
-    const pr24 = findMetric(panel, 'PR24');
-    const mi24 = findMetric(panel, 'MI24');
-    const mi28 = findMetric(panel, 'MI28');
-    if (p12Tab === 'prices') {
-      const cohorts = asList<{ cohort?: string; currency?: string; period?: string; mentions?: number; min?: number; median?: number; max?: number; evidence_ref?: { id?: string } }>(
-        mi24?.data?.cohorts,
-      );
-      const option: EChartOption | null = cohorts.length > 0 ? {
+    if (pid === 'P12') {
+      const pr24 = findMetric(panel, 'PR24');
+      const mi24 = findMetric(panel, 'MI24');
+      const mi28 = findMetric(panel, 'MI28');
+      if (p12Tab === 'prices') {
+        const cohorts = asList<{ cohort?: string; currency?: string; period?: string; mentions?: number; min?: number; median?: number; max?: number; evidence_ref?: { id?: string } }>(
+          mi24?.data?.cohorts,
+        );
+        const option: EChartOption | null = cohorts.length > 0 ? {
+          tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+          grid: { left: 100, right: 24, top: 16, bottom: 24 },
+          xAxis: { type: 'value', splitLine: { lineStyle: { color: colors.grid } } },
+          yAxis: { type: 'category', inverse: true, data: cohorts.map((c) => c.cohort || `${c.currency}/${c.period}`), axisLabel: { fontSize: 10.5, color: colors.muted } },
+          series: [{ name: t('Median Amount', '中位金额'), type: 'bar', barMaxWidth: 20, itemStyle: { color: colors.amber, borderRadius: [0, 4, 4, 0] }, data: cohorts.map((c) => asNum(c.median)) }],
+        } : null;
+        return {
+          option,
+          columns: [
+            { key: 'cohort', label: t('Currency / Period', '币种 / 周期') },
+            { key: 'mentions', label: t('Mentions', '提及次数') },
+            { key: 'min', label: t('Min', '最低') },
+            { key: 'median', label: t('Median', '中位数') },
+            { key: 'max', label: t('Max', '最高') },
+          ],
+          rows: cohorts.map((c) => ({
+            cohort: c.cohort || `${c.currency}/${c.period}`,
+            mentions: c.mentions ?? 0,
+            min: c.min ?? '—',
+            median: c.median ?? '—',
+            max: c.max ?? '—',
+          })),
+          summary: cohorts.length > 0
+            ? `共提取 ${cohorts.length} 组独立币种/周期价格区间（严格分币种统计，不跨币种混算）。价格关注文档共 ${asNum(pr24?.data?.documents)} 条（占比 ${pctStr(pr24?.data?.rate)}）。`
+            : `价格关注讨论 ${asNum(pr24?.data?.documents)} 条，但未提取出带明确币种的金额数值。`,
+          primaryEvidenceId: cohorts[0]?.evidence_ref?.id ?? extractEvidenceId(pr24?.data),
+          rowEvidenceIds: cohorts.map((c) => c.evidence_ref?.id),
+        };
+      }
+      const stages = asList<{ stage: string; documents: number; rate: number; evidence_ref?: { id?: string } }>(mi28?.data?.stages);
+      const option: EChartOption | null = stages.length > 0 ? {
         tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-        grid: { left: 100, right: 24, top: 16, bottom: 24 },
+        grid: { left: 96, right: 24, top: 16, bottom: 24 },
         xAxis: { type: 'value', splitLine: { lineStyle: { color: colors.grid } } },
-        yAxis: { type: 'category', inverse: true, data: cohorts.map((c) => c.cohort || `${c.currency}/${c.period}`), axisLabel: { fontSize: 10.5, color: colors.muted } },
-        series: [{ name: t('Median Amount', '中位金额'), type: 'bar', barMaxWidth: 20, itemStyle: { color: colors.amber, borderRadius: [0, 4, 4, 0] }, data: cohorts.map((c) => asNum(c.median)) }],
+        yAxis: { type: 'category', inverse: true, data: stages.map((s) => STAGE_LABELS[s.stage] ?? s.stage), axisLabel: { fontSize: 11, color: colors.muted } },
+        series: [{ name: t('Documents', '命中文档数'), type: 'bar', barMaxWidth: 20, itemStyle: { color: colors.primary, borderRadius: [0, 4, 4, 0] }, data: stages.map((s) => s.documents) }],
       } : null;
       return {
         option,
         columns: [
-          { key: 'cohort', label: t('Currency / Period', '币种 / 周期') },
-          { key: 'mentions', label: t('Mentions', '提及次数') },
-          { key: 'min', label: t('Min', '最低') },
-          { key: 'median', label: t('Median', '中位数') },
-          { key: 'max', label: t('Max', '最高') },
+          { key: 'stage', label: t('Purchase Stage', '购买决策阶段') },
+          { key: 'documents', label: t('Documents', '命中文档数') },
+          { key: 'rate', label: t('Share', '占总样本比') },
         ],
-        rows: cohorts.map((c) => ({
-          cohort: c.cohort || `${c.currency}/${c.period}`,
-          mentions: c.mentions ?? 0,
-          min: c.min ?? '—',
-          median: c.median ?? '—',
-          max: c.max ?? '—',
-        })),
-        summary: cohorts.length > 0
-          ? `共提取 ${cohorts.length} 组独立币种/周期价格区间（严格分币种统计，不跨币种混算）。价格关注文档共 ${asNum(pr24?.data?.documents)} 条（占比 ${pctStr(pr24?.data?.rate)}）。`
-          : `价格关注讨论 ${asNum(pr24?.data?.documents)} 条，但未提取出带明确币种的金额数值。`,
-        primaryEvidenceId: cohorts[0]?.evidence_ref?.id ?? extractEvidenceId(pr24?.data),
-        rowEvidenceIds: cohorts.map((c) => c.evidence_ref?.id),
+        rows: stages.map((s) => ({ stage: STAGE_LABELS[s.stage] ?? s.stage, documents: s.documents, rate: pctStr(s.rate) })),
+        summary: `价格关注文档 ${asNum(pr24?.data?.documents)} 条（${pctStr(pr24?.data?.rate)}）；购买决策阶段采用多标签识别（单条讨论可同时属于多个阶段），点击阶段条可直达原文。`,
+        primaryEvidenceId: extractEvidenceId(pr24?.data) ?? stages.find((s) => s.documents > 0)?.evidence_ref?.id,
+        rowEvidenceIds: stages.map((s) => s.evidence_ref?.id),
       };
     }
 
-    const stages = asList<{ stage: string; documents: number; rate: number; evidence_ref?: { id?: string } }>(mi28?.data?.stages);
-    const option: EChartOption | null = stages.length > 0 ? {
-      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      grid: { left: 96, right: 24, top: 16, bottom: 24 },
-      xAxis: { type: 'value', splitLine: { lineStyle: { color: colors.grid } } },
-      yAxis: { type: 'category', inverse: true, data: stages.map((s) => STAGE_LABELS[s.stage] ?? s.stage), axisLabel: { fontSize: 11, color: colors.muted } },
-      series: [{ name: t('Documents', '命中文档数'), type: 'bar', barMaxWidth: 20, itemStyle: { color: colors.primary, borderRadius: [0, 4, 4, 0] }, data: stages.map((s) => s.documents) }],
-    } : null;
+    if (pid === 'P13') {
+      const mi05 = findMetric(panel, 'MI05');
+      const mi06 = findMetric(panel, 'MI06');
+      const mi07 = findMetric(panel, 'MI07');
+      const mi14 = findMetric(panel, 'MI14');
+      const mi13 = findMetric(panel, 'MI13');
+
+      if (p13Tab === 'compare') {
+        const pairs = asList<{
+          brand_a: string;
+          brand_b: string;
+          relation_type: string;
+          direction: string;
+          documents: number;
+          evidence_ref?: { id?: string };
+        }>(mi14?.data?.pairs);
+        const relLabel: Record<string, string> = { switch: '切换/替换', alternative: '平替/对比优劣', compare: '直接对比' };
+        return {
+          option: null,
+          columns: [
+            { key: 'pair', label: t('Competitor Pair', '竞品对') },
+            { key: 'rel', label: t('Relation', '比较类型') },
+            { key: 'documents', label: t('Docs', '命中篇数') },
+          ],
+          rows: pairs.map((p) => ({
+            pair: p.direction === 'directed' ? `${p.brand_a} → ${p.brand_b}` : `${p.brand_a} vs ${p.brand_b}`,
+            rel: relLabel[p.relation_type] ?? p.relation_type,
+            documents: p.documents,
+          })),
+          summary: pairs.length > 0
+            ? `共识别出 ${pairs.length} 组同句直接竞品对比/切换关系（MI14，涉及 ${asNum(mi14?.data?.total_comparison_documents)} 篇讨论），已与普通共提（MI13）严格分层。`
+            : mi14?.reason || '当前样本中未检测到显式同句品牌对比关系。',
+          primaryEvidenceId: pairs[0]?.evidence_ref?.id,
+          rowEvidenceIds: pairs.map((p) => p.evidence_ref?.id),
+        };
+      }
+
+      if (p13Tab === 'cooccur') {
+        const edges = asList<{ brand_a: string; brand_b: string; co_documents: number; lift: number; npmi: number; evidence_ref?: { id?: string } }>(mi13?.data?.edges);
+        return {
+          option: null,
+          columns: [
+            { key: 'pair', label: t('Co-occurring Pair', '共提品牌对') },
+            { key: 'co_documents', label: t('Co-docs', '共提篇数') },
+            { key: 'lift', label: 'Lift' },
+            { key: 'npmi', label: 'NPMI' },
+          ],
+          rows: edges.map((e) => ({ pair: `${e.brand_a} × ${e.brand_b}`, co_documents: e.co_documents, lift: e.lift.toFixed(2), npmi: e.npmi.toFixed(2) })),
+          summary: edges.length > 0
+            ? `共发现 ${edges.length} 组文档级品牌共提关联（MI13），仅供观察品牌生态共现强度，不等同于直接竞争替代。`
+            : mi13?.reason || '当前样本品牌共提对少于 2 组。',
+          primaryEvidenceId: edges[0]?.evidence_ref?.id,
+          rowEvidenceIds: edges.map((e) => e.evidence_ref?.id),
+        };
+      }
+
+      const brands = asList<{
+        brand: string;
+        documents: number;
+        sov_share: number;
+        coverage_rate: number;
+        aliases_matched?: string[];
+        evidence_ref?: { id?: string };
+      }>(mi06?.data?.brands ?? mi05?.data?.brands).slice(0, 12);
+      const option: EChartOption | null = brands.length > 0 ? {
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+        grid: { left: 120, right: 28, top: 16, bottom: 24 },
+        xAxis: { type: 'value', splitLine: { lineStyle: { color: colors.grid } } },
+        yAxis: { type: 'category', inverse: true, data: brands.map((b) => b.brand), axisLabel: { fontSize: 11, color: colors.muted, width: 108, overflow: 'truncate' } },
+        series: [{ name: t('Brand Mentions', '品牌提及篇数'), type: 'bar', barMaxWidth: 20, itemStyle: { color: colors.teal, borderRadius: [0, 4, 4, 0] }, data: brands.map((b) => b.documents) }],
+      } : null;
+      return {
+        option,
+        columns: [
+          { key: 'brand', label: t('Brand', '规范品牌') },
+          { key: 'documents', label: t('Mentions', '提及篇数') },
+          { key: 'sov', label: t('SOV (MI06)', '声量份额') },
+          { key: 'cov', label: t('Doc Coverage', '文档覆盖率') },
+        ],
+        rows: brands.map((b) => ({ brand: b.brand, documents: b.documents, sov: pctStr(b.sov_share), cov: pctStr(b.coverage_rate) })),
+        summary: brands.length > 0
+          ? `共识别 ${asNum(mi07?.data?.distinct_brands) || brands.length} 个品牌，品牌提及覆盖率 ${pctStr(mi07?.data?.coverage_rate)}（未匹配品牌占 ${pctStr(mi07?.data?.unmatched_rate)}）；声量份额 Top 1 为「${brands[0].brand}」（${pctStr(brands[0].sov_share)}）。`
+          : mi05?.reason || '当前样本未命中已知品牌词表。',
+        primaryEvidenceId: brands[0]?.evidence_ref?.id ?? extractEvidenceId(mi07?.data),
+        rowEvidenceIds: brands.map((b) => b.evidence_ref?.id),
+      };
+    }
+
+    if (pid === 'P14') {
+      const mi19 = findMetric(panel, 'MI19');
+      const pr07 = findMetric(panel, 'PR07');
+      const pr13 = findMetric(panel, 'PR13');
+      const od16 = findMetric(panel, 'OD16');
+
+      if (p14Tab === 'attr') {
+        const attrs = asList<{
+          attribute: string;
+          documents: number;
+          positive: number;
+          negative: number;
+          negative_rate: number | null;
+          opinion_denominator: number;
+          low_support?: boolean;
+          evidence_ref?: { id?: string };
+        }>(pr07?.data?.attributes).slice(0, 12);
+        const rated = attrs.filter((a) => typeof a.negative_rate === 'number');
+        const option: EChartOption | null = rated.length > 0 ? {
+          tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+          grid: { left: 112, right: 28, top: 16, bottom: 24 },
+          xAxis: { type: 'value', max: 100, axisLabel: { formatter: '{value}%' }, splitLine: { lineStyle: { color: colors.grid } } },
+          yAxis: { type: 'category', inverse: true, data: rated.map((a) => a.attribute), axisLabel: { fontSize: 11, color: colors.muted } },
+          series: [{ name: t('Negative Rate %', '属性负面率 (%)'), type: 'bar', barMaxWidth: 18, itemStyle: { color: colors.coral, borderRadius: [0, 4, 4, 0] }, data: rated.map((a) => Number(((a.negative_rate ?? 0) * 100).toFixed(1))) }],
+        } : null;
+        return {
+          option,
+          columns: [
+            { key: 'attribute', label: t('Attribute', '产品属性') },
+            { key: 'documents', label: t('Mentions', '提及篇数') },
+            { key: 'posNeg', label: t('Pos / Neg', '正 / 负') },
+            { key: 'negRate', label: t('Neg Rate', '负面率') },
+          ],
+          rows: attrs.map((a) => ({
+            attribute: `${a.attribute}${a.low_support ? ' (低样本)' : ''}`,
+            documents: a.documents,
+            posNeg: `${a.positive} / ${a.negative}`,
+            negRate: typeof a.negative_rate === 'number' ? pctStr(a.negative_rate) : '无明确极性',
+          })),
+          summary: rated.length > 0
+            ? `属性负面率排行（PR07）：「${rated[0].attribute}」负面率 ${pctStr(rated[0].negative_rate)}（分母 ${rated[0].opinion_denominator} 篇明确正负评价）。`
+            : pr07?.reason || '暂无足够属性级正负评价。',
+          primaryEvidenceId: rated[0]?.evidence_ref?.id ?? attrs[0]?.evidence_ref?.id,
+          rowEvidenceIds: (rated.length ? rated : attrs).map((a) => a.evidence_ref?.id),
+        };
+      }
+
+      if (p14Tab === 'scenario') {
+        const scens = asList<{
+          scenario: string;
+          documents: number;
+          demand_documents: number;
+          pain_documents: number;
+          demand_rate: number;
+          evidence_ref?: { id?: string };
+        }>(pr13?.data?.scenarios).slice(0, 12);
+        const option: EChartOption | null = scens.length > 0 ? {
+          tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+          legend: { top: 0, textStyle: { fontSize: 11, color: colors.muted } },
+          grid: { left: 112, right: 24, top: 28, bottom: 24 },
+          xAxis: { type: 'value', splitLine: { lineStyle: { color: colors.grid } } },
+          yAxis: { type: 'category', inverse: true, data: scens.map((s) => s.scenario), axisLabel: { fontSize: 11, color: colors.muted } },
+          series: [
+            { name: t('All Mentions', '全部场景提及'), type: 'bar', barMaxWidth: 14, itemStyle: { color: colors.primary, borderRadius: [0, 3, 3, 0] }, data: scens.map((s) => s.documents) },
+            { name: t('Active Demand', '场景主动需求'), type: 'bar', barMaxWidth: 14, itemStyle: { color: colors.teal, borderRadius: [0, 3, 3, 0] }, data: scens.map((s) => s.demand_documents) },
+          ],
+        } : null;
+        return {
+          option,
+          columns: [
+            { key: 'scenario', label: t('Usage Scenario', '使用场景') },
+            { key: 'documents', label: t('All Mentions', '全部提及') },
+            { key: 'demand', label: t('Active Demand', '明确需求') },
+            { key: 'pain', label: t('Pain Docs', '痛点篇数') },
+          ],
+          rows: scens.map((s) => ({ scenario: s.scenario, documents: s.documents, demand: `${s.demand_documents} (${pctStr(s.demand_rate)})`, pain: s.pain_documents })),
+          summary: scens.length > 0
+            ? `使用场景需求分布（PR13，多标签可重叠）：高频场景为「${scens[0].scenario}」（${scens[0].documents} 篇提及，其中 ${scens[0].demand_documents} 篇含主动需求）。`
+            : pr13?.reason || '当前样本未识别出明确使用场景。',
+          primaryEvidenceId: scens[0]?.evidence_ref?.id,
+          rowEvidenceIds: scens.map((s) => s.evidence_ref?.id),
+        };
+      }
+
+      if (p14Tab === 'workaround') {
+        const cats = asList<{ category: string; documents: number; resolved_count: number; evidence_ref?: { id?: string } }>(od16?.data?.categories);
+        const cases = asList<{ category: string; excerpt: string; resolution_status: string }>(od16?.data?.cases).slice(0, 8);
+        return {
+          option: null,
+          columns: [
+            { key: 'category', label: t('Workaround Type', '变通类别') },
+            { key: 'status', label: t('Status', '状态') },
+            { key: 'excerpt', label: t('User Workaround Excerpt', '用户变通/自制原话') },
+          ],
+          rows: cases.map((c) => ({
+            category: c.category,
+            status: c.resolution_status === 'resolved' ? '已验证有效' : '绕行使用中',
+            excerpt: c.excerpt.slice(0, 160),
+          })),
+          summary: cases.length > 0
+            ? `共提取 ${asNum(od16?.data?.documents)} 篇用户变通/自制/第三方替代方案（OD16，占样本 ${pctStr(od16?.data?.rate)}），可用于定位产品原生能力缺口。`
+            : od16?.reason || '当前样本未检测到显著用户变通方案。',
+          primaryEvidenceId: cats[0]?.evidence_ref?.id ?? extractEvidenceId(od16?.data),
+          rowEvidenceIds: cats.map((c) => c.evidence_ref?.id),
+        };
+      }
+
+      // Default P14 tab: MI19 Brand × Attribute Sentiment Heatmap
+      const brands = asList<string>(mi19?.data?.brands);
+      const attrs = asList<string>(mi19?.data?.attributes);
+      const cells = asList<{
+        brand: string;
+        attribute: string;
+        documents: number;
+        positive: number;
+        negative: number;
+        opinion_denominator: number;
+        net_sentiment: number | null;
+        low_support?: boolean;
+        evidence_ref?: { id?: string };
+      }>(mi19?.data?.cells);
+      const ratedCells = cells.filter((c) => typeof c.net_sentiment === 'number');
+      const hmData = ratedCells.map((c) => [attrs.indexOf(c.attribute), brands.indexOf(c.brand), c.net_sentiment ?? 0]);
+      const option: EChartOption | null = brands.length > 0 && attrs.length > 0 && hmData.length > 0 ? {
+        tooltip: { position: 'top' },
+        grid: { left: 108, right: 20, top: 14, bottom: 52 },
+        xAxis: { type: 'category', data: attrs, splitArea: { show: true }, axisLabel: { fontSize: 10.5, color: colors.muted, rotate: attrs.length > 5 ? 20 : 0 } },
+        yAxis: { type: 'category', data: brands, splitArea: { show: true }, axisLabel: { fontSize: 11, color: colors.muted } },
+        visualMap: {
+          min: -1,
+          max: 1,
+          orient: 'horizontal',
+          left: 'center',
+          bottom: 0,
+          itemHeight: 80,
+          itemWidth: 10,
+          inRange: { color: ['#dc2626', '#fca5a5', '#f8fafc', '#6ee7b7', '#0f766e'] },
+        },
+        series: [{ name: t('Net Sentiment', '净情感指数'), type: 'heatmap', data: hmData, label: { show: true, fontSize: 10, color: '#0f172a' } }],
+      } : null;
+      return {
+        option,
+        columns: [
+          { key: 'brand', label: t('Brand', '品牌') },
+          { key: 'attribute', label: t('Attribute', '属性') },
+          { key: 'posNeg', label: t('Pos / Neg', '正 / 负') },
+          { key: 'nsi', label: t('Net Sentiment', '净情感 [-1,+1]') },
+        ],
+        rows: cells.slice(0, 15).map((c) => ({
+          brand: c.brand,
+          attribute: `${c.attribute}${c.low_support ? ' (低样本)' : ''}`,
+          posNeg: `${c.positive} / ${c.negative}`,
+          nsi: typeof c.net_sentiment === 'number' ? (c.net_sentiment >= 0 ? `+${c.net_sentiment.toFixed(2)}` : c.net_sentiment.toFixed(2)) : '无明确极性',
+        })),
+        summary: cells.length > 0
+          ? `品牌×属性情感矩阵（MI19，分句目标归属）共覆盖 ${brands.length} 个品牌 × ${attrs.length} 项属性（${cells.length} 个有效单元格），颜色由红（-1）至青（+1）表示净情感指数。`
+          : mi19?.reason || '当前样本的品牌×属性共现评价不足。',
+        primaryEvidenceId: ratedCells[0]?.evidence_ref?.id ?? cells[0]?.evidence_ref?.id,
+        rowEvidenceIds: ratedCells.map((c) => c.evidence_ref?.id),
+      };
+    }
+
     return {
-      option,
-      columns: [
-        { key: 'stage', label: t('Purchase Stage', '购买决策阶段') },
-        { key: 'documents', label: t('Documents', '命中文档数') },
-        { key: 'rate', label: t('Share', '占总样本比') },
-      ],
-      rows: stages.map((s) => ({ stage: STAGE_LABELS[s.stage] ?? s.stage, documents: s.documents, rate: pctStr(s.rate) })),
-      summary: `价格关注文档 ${asNum(pr24?.data?.documents)} 条（${pctStr(pr24?.data?.rate)}）；购买决策阶段采用多标签识别（单条讨论可同时属于多个阶段），点击阶段条可直达原文。`,
-      primaryEvidenceId: extractEvidenceId(pr24?.data) ?? stages.find((s) => s.documents > 0)?.evidence_ref?.id,
-      rowEvidenceIds: stages.map((s) => s.evidence_ref?.id),
+      option: null,
+      columns: [],
+      rows: [],
+      summary: '暂无可用面板数据。',
+      rowEvidenceIds: [],
     };
-  }, [panel, p01Grain, p03Tab, p04Tab, p05Tab, p06Tab, p11Tab, p12Tab, colors, sourceProfile, t]);
+  }, [panel, p01Grain, p03Tab, p04Tab, p05Tab, p06Tab, p11Tab, p12Tab, p13Tab, p14Tab, colors, sourceProfile, t]);
 
   const block = useMemo(
     () => buildAdapterBlock(panel, sourceProfile, built.summary, glossaryNotes),
@@ -972,8 +1233,27 @@ export function ExplorePanelCard({
         </ToggleGroup>
       );
     }
+    if (panel.panel_id === 'P13') {
+      return (
+        <ToggleGroup value={[p13Tab]} onValueChange={(v) => { const next = v[v.length - 1]; if (next === 'sov' || next === 'compare' || next === 'cooccur') setP13Tab(next); }}>
+          <ToggleGroupItem value="sov">{t('Brand SOV', '品牌份额')}</ToggleGroupItem>
+          <ToggleGroupItem value="compare">{t('Direct Compare', '直接竞品对比')}</ToggleGroupItem>
+          <ToggleGroupItem value="cooccur">{t('Co-occurrence', '共提网络')}</ToggleGroupItem>
+        </ToggleGroup>
+      );
+    }
+    if (panel.panel_id === 'P14') {
+      return (
+        <ToggleGroup value={[p14Tab]} onValueChange={(v) => { const next = v[v.length - 1]; if (next === 'matrix' || next === 'attr' || next === 'scenario' || next === 'workaround') setP14Tab(next); }}>
+          <ToggleGroupItem value="matrix">{t('Brand × Attr', '品牌×属性热力')}</ToggleGroupItem>
+          <ToggleGroupItem value="attr">{t('Attr Neg Rate', '属性负面率')}</ToggleGroupItem>
+          <ToggleGroupItem value="scenario">{t('Scenarios', '使用场景需求')}</ToggleGroupItem>
+          <ToggleGroupItem value="workaround">{t('Workarounds', '用户变通方案')}</ToggleGroupItem>
+        </ToggleGroup>
+      );
+    }
     return null;
-  }, [panel, p01Grain, p03Tab, p04Tab, p05Tab, p06Tab, p11Tab, p12Tab, t]);
+  }, [panel, p01Grain, p03Tab, p04Tab, p05Tab, p06Tab, p11Tab, p12Tab, p13Tab, p14Tab, t]);
 
   const onChartEvents = useMemo(
     () => ({

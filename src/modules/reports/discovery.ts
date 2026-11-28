@@ -662,6 +662,34 @@ async function discoverStoriesChannel(
   }
 }
 
+const DISCOVERY_CACHE_TTL_MS = 5 * 60 * 1000;
+const DISCOVERY_CACHE_MAX = 64;
+const discoveryCache = new Map<string, { expiresAt: number; value: ResourceDiscoveryResponse }>();
+
+function buildDiscoveryCacheKey(actor: Actor, req: ResourceDiscoverRequestType): string {
+  const allowed = actor.allowedSourceIds ? [...actor.allowedSourceIds].sort() : "*";
+  return JSON.stringify([
+    actor.role,
+    actor.userId ?? null,
+    allowed,
+    req.topic.trim().toLowerCase(),
+    req.question?.trim() ?? "",
+    req.template ?? "commerce",
+    req.mode ?? "comprehensive",
+    req.aliases ?? [],
+    req.englishQuery?.trim() ?? "",
+    req.from ?? null,
+    req.to ?? null,
+    req.platforms ?? [],
+    req.subreddits ?? [],
+    req.languages ?? [],
+    req.sourceGroup ?? "",
+    req.projectId ?? null,
+    Boolean(req.verifyArchivePhrase),
+    req.includeSamples !== false,
+  ]);
+}
+
 export async function discoverResearchResources(
   pool: Pool,
   actor: Actor,
@@ -669,6 +697,17 @@ export async function discoverResearchResources(
   archiveRuntime?: ArchiveRuntimeFacade,
 ): Promise<ResourceDiscoveryResponse> {
   const t0 = Date.now();
+  const cacheKey = buildDiscoveryCacheKey(actor, req);
+  const now = Date.now();
+  const hit = discoveryCache.get(cacheKey);
+  if (hit && hit.expiresAt > now) {
+    return {
+      ...hit.value,
+      discoveryId: `disc_${now.toString(36)}_cached`,
+      generatedAt: new Date(now).toISOString(),
+      elapsedMs: Math.max(1, Date.now() - t0),
+    };
+  }
   const parsed = parseResearchQuery({
     topic: req.topic,
     question: req.question,
@@ -807,7 +846,7 @@ export async function discoverResearchResources(
         ? "适合初步研究 · 可按需补充资料"
         : "建议补充资料或调整检索条件";
 
-  return {
+  const response: ResourceDiscoveryResponse = {
     discoveryId: `disc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     generatedAt: new Date().toISOString(),
     elapsedMs: Date.now() - t0,
@@ -830,4 +869,12 @@ export async function discoverResearchResources(
       recommendedBatchIds: pgChannel.batches.slice(0, 5).map((b) => b.batchId),
     },
   };
+  if (archiveChannel.status !== "error" && archiveChannel.status !== "timeout") {
+    discoveryCache.set(cacheKey, { expiresAt: Date.now() + DISCOVERY_CACHE_TTL_MS, value: response });
+    if (discoveryCache.size > DISCOVERY_CACHE_MAX) {
+      const oldest = discoveryCache.keys().next().value;
+      if (oldest) discoveryCache.delete(oldest);
+    }
+  }
+  return response;
 }

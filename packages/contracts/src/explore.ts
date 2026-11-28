@@ -23,6 +23,14 @@ export const ExploreGroupBy = Type.Union([
 export const ExploreProfile = Type.Union([
   Type.Literal("fast"),
   Type.Literal("balanced"),
+  Type.Literal("standard"),
+  Type.Literal("deep"),
+]);
+
+export const ExploreAccelMode = Type.Union([
+  Type.Literal("off"),
+  Type.Literal("auto"),
+  Type.Literal("prefer_gpu"),
 ]);
 
 export const ExplorePanelId = Type.Union([
@@ -38,6 +46,8 @@ export const ExplorePanelId = Type.Union([
   Type.Literal("P10"),
   Type.Literal("P11"),
   Type.Literal("P12"),
+  Type.Literal("P13"),
+  Type.Literal("P14"),
 ]);
 
 export const ExploreScenarioId = Type.Union([
@@ -45,6 +55,7 @@ export const ExploreScenarioId = Type.Union([
   Type.Literal("audience"),
   Type.Literal("topics"),
   Type.Literal("voice"),
+  Type.Literal("commercial"),
 ]);
 
 export const ExploreMetricState = Type.Union([
@@ -71,8 +82,10 @@ export const ExploreAnalyzeRequest = Type.Object(
     to: Type.Optional(Type.Union([Type.String({ maxLength: 35 }), Type.Null()])),
     groupBy: Type.Optional(ExploreGroupBy),
     profile: Type.Optional(ExploreProfile),
+    accelMode: Type.Optional(ExploreAccelMode),
+    useV2Sentiment: Type.Optional(Type.Boolean()),
     includeComments: Type.Optional(Type.Boolean()),
-    limit: Type.Optional(Type.Integer({ minimum: 25, maximum: 10000 })),
+    limit: Type.Optional(Type.Integer({ minimum: 25, maximum: 15000 })),
   },
   strict,
 );
@@ -213,6 +226,8 @@ export const ExploreCapabilitiesResponse = Type.Object({
   archiveMonths: Type.Array(Type.String()),
   pythonWorkerReady: Type.Boolean(),
   potionModelReady: Type.Boolean(),
+  balancedReady: Type.Optional(Type.Boolean()),
+  v2Runtime: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
   liveContentCounts: Type.Object({
     total: Type.Integer({ minimum: 0 }),
     infoStream: Type.Integer({ minimum: 0 }),

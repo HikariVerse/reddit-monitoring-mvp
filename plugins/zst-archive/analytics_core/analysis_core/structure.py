@@ -97,6 +97,8 @@ def topic(study, mid, ids, filters):
         if mid in {"SR08", "SR29"}:
             row["representatives"] = representatives(study, (item for item in ranks[label] if item[0] in group_set))
         topics_summary.append(row)
+    # S1-02: Always sort topics descending by document volume with stable topic_label tie-break
+    topics_summary.sort(key=lambda item: (-item["documents"], item["topic_label"]))
     if mid == "SR08":
         noise = members.get(-1, [])
         state = "exploratory" if topics_summary else "insufficient_data"

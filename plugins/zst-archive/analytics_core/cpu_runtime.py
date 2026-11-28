@@ -116,18 +116,25 @@ class AnalysisCancelled(RuntimeError):
 
 
 class Budget:
-    """Fair whole-job leases, with one active heavy job per process.
+    """Fair whole-job leases with configurable multi-slot concurrency.
 
-    Serial leases make BLAS/OpenMP limits process-wide and race-free. Operators
-    parallelize within that lease. A multi-process host uses one shared worker.
+    When host has >= 8 effective logical CPUs (e.g., 16T workstation), allows up to
+    BI_MAX_CONCURRENT_JOBS (default 2) heavy jobs concurrently with dynamically split
+    per-job worker budgets, eliminating 2x serial queueing while preventing oversubscription.
     """
 
     def __init__(self):
         self.lock = Condition()
         self.queue = deque()
-        self.running = None
+        self.running: list[dict] = []
         self.recent = deque(maxlen=16)
         self.next_id = 1
+
+    def _max_slots(self) -> int:
+        raw = os.getenv("BI_MAX_CONCURRENT_JOBS", "auto").strip().lower()
+        if raw.isascii() and raw.isdecimal() and int(raw) >= 1:
+            return min(4, int(raw))
+        return 2 if cpu_policy().effective_cpu_count >= 8 else 1
 
     @contextmanager
     def job(self, name, cancel=None):
@@ -137,11 +144,13 @@ class Budget:
             yield parent
             return
         with self.lock:
-            item = {"id": self.next_id, "name": name, "workers": cpu_policy().workers,
+            slots = self._max_slots()
+            per_job_workers = max(2, cpu_policy().workers // slots) if slots > 1 else cpu_policy().workers
+            item = {"id": self.next_id, "name": name, "workers": per_job_workers,
                     "operators": {}, "stages": [], "queued_at": perf_counter(), "cancel": cancel}
             self.next_id += 1
             self.queue.append(item)
-            while self.running is not None or self.queue[0] is not item:
+            while len(self.running) >= slots or self.queue[0] is not item:
                 if cancel is not None and cancel.is_set():
                     self.queue.remove(item)
                     self.lock.notify_all()
@@ -152,7 +161,7 @@ class Budget:
                 self.lock.notify_all()
                 raise AnalysisCancelled(name)
             item.update(started_at=perf_counter(), cpu_start=process_time())
-            self.running = item
+            self.running.append(item)
         token = _lease.set(item)
         state = "done"
         try:
@@ -167,7 +176,8 @@ class Budget:
             _lease.reset(token)
             with self.lock:
                 self.recent.append({**self._record(item), "status": state})
-                self.running = None
+                if item in self.running:
+                    self.running.remove(item)
                 self.lock.notify_all()
 
     def _record(self, item):
@@ -180,8 +190,10 @@ class Budget:
 
     def status(self):
         with self.lock:
-            return {**asdict(cpu_policy()), "running_jobs": int(self.running is not None),
-                    "queued_jobs": len(self.queue), "active": self._record(self.running) if self.running else None,
+            return {**asdict(cpu_policy()), "max_concurrent_jobs": self._max_slots(),
+                    "running_jobs": len(self.running),
+                    "queued_jobs": len(self.queue),
+                    "active": [self._record(r) for r in self.running] if self.running else None,
                     "recent_jobs": list(self.recent)}
 
 

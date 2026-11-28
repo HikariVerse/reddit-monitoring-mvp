@@ -117,7 +117,10 @@ def demand_states(text, linguistic):
                                "constraints": constraints, "argument": dep["arguments"][-1], "coordinate_space": "focus"})
                 existing.add(state)
         additional = {
-            "alternative_considered": bool(re.search(r"\b(?:considering|alternatives? to|instead of|other options)\b", sentence, re.I)),
+            "alternative_considered": bool(re.search(
+                r"\b(?:considering (?:buying|getting|switching)|alternatives? to|other options|(?:buy|get|choose|switch\w* to)\b.{0,28}\binstead of)\b",
+                sentence, re.I,
+            )),
             "switch_intent": bool(SWITCH_CUE.search(sentence) and MODAL.search(sentence) and not negative),
             "switched": bool(re.search(r"\b(?:switched|migrated|upgraded|moved)\s+(?:from|to)\b", sentence, re.I) and not MODAL.search(sentence) and not negative),
         }

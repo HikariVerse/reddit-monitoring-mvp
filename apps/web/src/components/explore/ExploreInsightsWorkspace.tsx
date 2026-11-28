@@ -406,7 +406,9 @@ export function ExploreInsightsWorkspace({
             <span>
               {cap?.archiveAvailable
                 ? t(`Archive ready · ${cap.archiveMonths.length} months`, `归档已就绪 · ${cap.archiveMonths.length} 个月`)
-                : t('Archive offline', '归档未连接')}
+                : cap?.archiveState === 'archive_forbidden'
+                  ? t('Archive not authorized', '未开通归档权限')
+                  : t('Archive offline', '归档未连接')}
             </span>
           </span>
 
@@ -421,7 +423,11 @@ export function ExploreInsightsWorkspace({
                 <div className="flex items-center justify-between">
                   <span>{t('R4 DuckDB Archive', 'R4 DuckDB 归档引擎')}</span>
                   <Badge variant={cap?.archiveAvailable ? 'secondary' : 'outline'} className="text-[10px]">
-                    {cap?.archiveAvailable ? t(`${cap.archiveMonths.length} months`, `${cap.archiveMonths.length} 个月在线`) : t('Offline', '未连接')}
+                    {cap?.archiveAvailable
+                      ? t(`${cap.archiveMonths.length} months`, `${cap.archiveMonths.length} 个月在线`)
+                      : cap?.archiveState === 'archive_forbidden'
+                        ? t('Not authorized', '未授权')
+                        : t('Offline', '未连接')}
                   </Badge>
                 </div>
                 <div className="flex items-center justify-between">

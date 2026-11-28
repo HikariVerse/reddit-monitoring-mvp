@@ -59,10 +59,15 @@ class Config:
     group_by: str = "group"
     k_topics: int = 8
     top: int = 20
+    accel_mode: str | None = None
+    use_v2_sentiment: bool = True
 
     def __post_init__(self):
+        if self.profile in {"standard", "deep"}:
+            # Map V2 profile names onto balanced linguistic/semantic core cleanly
+            object.__setattr__(self, "profile", "balanced")
         if self.profile not in {"fast", "balanced"}:
-            raise ValueError("profile must be fast or balanced")
+            raise ValueError("profile must be fast, balanced, standard or deep")
         if self.group_by not in {"group", "source", "dataset", "kind", "language"}:
             raise ValueError("unsupported grouping field")
         if not 1 <= self.top <= 100 or not 2 <= self.k_topics <= 40 or self.min_chars < 1:

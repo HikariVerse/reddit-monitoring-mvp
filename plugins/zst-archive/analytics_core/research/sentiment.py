@@ -53,8 +53,11 @@ def score_span(tokens: list[str], lo: int, hi: int) -> tuple[float, int, int]:
         for j in range(max(0, i - 2), i):
             if tokens[j] in L.INTENSIFIERS:
                 w *= L.INTENSIFIERS[tokens[j]]
+        # Handle forward negation ("without" after negative adj, e.g. "stupid to try without an AI assistant")
+        if base < 0 and any(tokens[j] in ("without", "lacking") for j in range(i + 1, min(len(tokens), i + 5))):
+            w *= -1.0
         total += base * w
-        if base > 0:
+        if base * w > 0:
             pos += 1
         else:
             neg += 1

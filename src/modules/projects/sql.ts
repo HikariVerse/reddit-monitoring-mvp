@@ -24,6 +24,10 @@ export interface ProjectDataSummary {
   shared_batch_count: number;
   private_batch_count: number;
   latest_batch_at: string | null;
+  archive_ref_count?: number;
+  report_count?: number;
+  latest_report_analyzed_count?: number;
+  latest_report_source_kind?: string | null;
 }
 
 export interface Project {
@@ -52,7 +56,16 @@ export interface Project {
 export async function listProjects(pool: Pool | PoolClient, actor: Actor, id?: string) {
   const isViewer = actor.role === "viewer";
   const restrictBatches = isViewer || actor.allowedSourceIds !== null;
-  const { rows } = await pool.query<Project & { batch_ids: string[]; enabled_batch_ids: string[] }>(`
+  const { rows } = await pool.query<
+    Project & {
+      batch_ids: string[];
+      enabled_batch_ids: string[];
+      archive_ref_count: number;
+      report_count: number;
+      latest_report_analyzed_count: number;
+      latest_report_source_kind: string | null;
+    }
+  >(`
     SELECT p.id, p.name, p.description, p.dataset_mode, p.visibility, p.origin_kind, p.research_goal, p.owner_user_id,
       p.forked_from_project_id, p.linked_monitor_id, p.filter,
       p.revision, p.thread_aware, p.include_push_in_trends, p.created_at, p.updated_at,
@@ -62,7 +75,11 @@ export async function listProjects(pool: Pool | PoolClient, actor: Actor, id?: s
       COALESCE(b.enabled_batch_count, 0)::int AS enabled_batch_count,
       COALESCE(b.total_batch_count, 0)::int AS total_batch_count,
       COALESCE(b.batch_ids, ARRAY[]::uuid[]) AS batch_ids,
-      COALESCE(b.enabled_batch_ids, ARRAY[]::uuid[]) AS enabled_batch_ids
+      COALESCE(b.enabled_batch_ids, ARRAY[]::uuid[]) AS enabled_batch_ids,
+      COALESCE(ar.archive_ref_count, 0)::int AS archive_ref_count,
+      COALESCE(rp.report_count, 0)::int AS report_count,
+      COALESCE(rp.latest_report_analyzed_count, 0)::int AS latest_report_analyzed_count,
+      rp.latest_report_source_kind
     FROM monitor_project p
     CROSS JOIN LATERAL (
       SELECT ARRAY(SELECT collection_source_id FROM monitor_project_source WHERE project_id=p.id ORDER BY collection_source_id) AS source_ids
@@ -75,6 +92,26 @@ export async function listProjects(pool: Pool | PoolClient, actor: Actor, id?: s
       FROM monitor_project_batch
       WHERE project_id = p.id
     ) b ON true
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::int AS archive_ref_count
+      FROM monitor_project_archive
+      WHERE project_id = p.id
+    ) ar ON true
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::int AS report_count,
+             (ARRAY_AGG(
+               COALESCE(NULLIF(rd.scope_json->'scopes'->0->>'analyzedCount', '')::int, 0)
+               ORDER BY rd.created_at DESC
+             ))[1] AS latest_report_analyzed_count,
+             (ARRAY_AGG(
+               rd.scope_json->'scopes'->0->>'sourceKind'
+               ORDER BY rd.created_at DESC
+             ))[1] AS latest_report_source_kind
+      FROM report_document rd
+      WHERE rd.project_id = p.id
+        AND rd.deleted_at IS NULL
+        AND (NOT $3::boolean OR rd.owner_user_id = $4::uuid OR rd.visibility = 'shared')
+    ) rp ON true
     WHERE ($1::uuid[] IS NULL OR s.source_ids <@ $1)
       AND ($2::uuid IS NULL OR p.id=$2)
       AND ($5::boolean OR p.dataset_mode <> 'batch')
@@ -101,13 +138,30 @@ export async function listProjects(pool: Pool | PoolClient, actor: Actor, id?: s
     );
     for (const row of sourceRows) sourceMetaById.set(row.id, { label: row.label, platform: row.platform });
   }
-  return rows.map(({ batch_ids, enabled_batch_ids, ...project }) => {
+  return rows.map(({
+    batch_ids,
+    enabled_batch_ids,
+    archive_ref_count,
+    report_count,
+    latest_report_analyzed_count,
+    latest_report_source_kind,
+    ...project
+  }) => {
     const activeBatches = enabled_batch_ids
       .map(bid => authorizedById.get(bid))
       .filter((b): b is NonNullable<typeof b> => Boolean(b));
+    const archiveExtra = {
+      archive_ref_count,
+      report_count,
+      latest_report_analyzed_count,
+      latest_report_source_kind,
+    };
     const data_summary: ProjectDataSummary = project.dataset_mode === "batch"
       ? {
-          platforms: [...new Set(activeBatches.map(b => b.platform))],
+          platforms: [...new Set([
+            ...activeBatches.map(b => b.platform),
+            ...(archive_ref_count > 0 ? ["reddit"] : []),
+          ])],
           source_labels: [...new Set(activeBatches.map(b => b.sourceLabel))].slice(0, 8),
           item_count: activeBatches.reduce((sum, b) => sum + b.itemCount, 0),
           shared_batch_count: activeBatches.filter(b => b.visibility === "shared").length,
@@ -116,14 +170,19 @@ export async function listProjects(pool: Pool | PoolClient, actor: Actor, id?: s
             (latest, b) => (!latest || b.createdAt > latest ? b.createdAt : latest),
             null,
           ),
+          ...archiveExtra,
         }
       : {
-          platforms: [...new Set(project.source_ids.map(sid => sourceMetaById.get(sid)?.platform).filter((v): v is string => Boolean(v)))],
+          platforms: [...new Set([
+            ...project.source_ids.map(sid => sourceMetaById.get(sid)?.platform).filter((v): v is string => Boolean(v)),
+            ...(archive_ref_count > 0 ? ["reddit"] : []),
+          ])],
           source_labels: [...new Set(project.source_ids.map(sid => sourceMetaById.get(sid)?.label).filter((v): v is string => Boolean(v)))].slice(0, 8),
           item_count: 0,
           shared_batch_count: 0,
           private_batch_count: 0,
           latest_batch_at: null,
+          ...archiveExtra,
         };
     if (!restrictBatches) return { ...project, data_summary };
     return {

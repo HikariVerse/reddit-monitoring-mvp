@@ -10,6 +10,7 @@
   background: var(--white, #ffffff);
   color: var(--ink, #20271f);
   font-family: var(--font-sans);
+  overflow-x: clip;
 }
 
 .ps-header {

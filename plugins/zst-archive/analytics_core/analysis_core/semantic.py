@@ -23,10 +23,30 @@ ACTIVE = states.ACTIVE | {"solution_search", "alternative_search", "bundled_need
 INTENT_STATES = {"寻找解决方案": "solution_search", "寻找替代品": "alternative_search", "组合需求": "bundled_need",
                  "求推荐": "recommendation_request", "功能请求": "feature_request"}
 USE = re.compile(r"\b(?:i|we|my|our)\b.{0,36}\b(?:use|using|own|owned|used|tested|tried|installed)\b|我用|用了", re.I)
-PRICE_ATTENTION = re.compile(r"\b(?:price|pricing|how much|costs?|budget|afford|overpriced|expensive|cheaper|"
-                             r"list price|subscription|coupon|discount|value for money)\b|价格|预算|订阅|太贵|便宜", re.I)
+# S1-10: Anchor "how much" to price/cost/purchase verbs so non-price quantity questions
+# ("how much sound leakage", "how much of the Excel workbook") are not misclassified.
+PRICE_ATTENTION = re.compile(
+    r"\b(?:price|pricing|costs?|budget|afford\w*|overpriced|expensive|cheaper|"
+    r"list price|subscription|coupon|discount|value for money|msrp|"
+    r"spend\s+(?:so\s+)?much\s+money|"
+    r"how much\s+(?:does|do|did|is|are|was|were|would|will|to\s+(?:buy|pay|spend|cost)|for\b|it\s+costs?))\b"
+    r"|价格|定价|价位|预算|订阅|太贵|便宜|多少钱|性价比|降价|优惠|划算",
+    re.I,
+)
 RETURN = re.compile(r"\b(?:i|we)\s+(?:have\s+)?(?:returned|sent it back|got a refund)\b|已退货|已经退货", re.I)
 SUBSCRIPTION = re.compile(r"\b(?:subscription|subscribe|annual billing)\b|订阅", re.I)
+PAIN_EXCLUDE_RE = re.compile(
+    r"\b(?:open[- ]box|seal(?:ed)?\s+broken|brand new in box|for sale|wtb|wts|"
+    r"thanks in advance|this community is amazing|"
+    r"to their credit.{0,60}refund|offered to refund|promptly issued a full refund|"
+    r"honored the warranty|replaced it for free|great (?:customer )?service)\b|"
+    r"免费换新|售后态度点赞|出全新未拆封|出闲置",
+    re.I,
+)
+PAIN_RESOLVED_RE = re.compile(
+    r"\b(?:fixed it|solved it|resolved|offered to refund|got a replacement|replaced it|warranty replaced)\b|已解决|已经解决|给退了|换新了",
+    re.I,
+)
 
 
 def _sentence_items(text, expression, label):
@@ -72,6 +92,9 @@ def _semantic_batch(items):
                 if re.search(r"\b(?:no|never|not)\s+(?:really\s+)?(?:any\s+)?(?:problems?|issues?|noise|pain|"
                              r"broken|failed|uncomfortable|too expensive)\b", sentence, re.I):
                     continue
+                if PAIN_EXCLUDE_RE.search(sentence):
+                    continue
+                item["resolution_status"] = "resolved" if PAIN_RESOLVED_RE.search(sentence) else "unresolved"
                 pains.append(item)
         price = list(_sentence_items(text, PRICE_ATTENTION, "price_attention"))
         stages = [{**item, "stage": PURCHASE[item["state"]]} for item in row["demand_states"] if item["state"] in PURCHASE]
@@ -98,7 +121,36 @@ def _signals(study):
         parsed = linguistics(study)
         items = [(study.rows[i]["focus"], parsed.get(i, {}), study.v4_features.get(i, {}).get("entities", ())) for i in study.core]
         chunks = ordered_map(_semantic_batch, items, label="shared_semantic_rules", parallel=not parsed)
-        return dict(zip(study.core, chain.from_iterable(chunks), strict=True))
+        result = dict(zip(study.core, chain.from_iterable(chunks), strict=True))
+
+        # S1-07: Upgrade sentiment consistently across all core docs via V2 multilingual ONNX (CPU INT8 / GPU FP16)
+        # No partial random subsampling -> zero silent mixing of lexicon & model labels!
+        accel_override = getattr(study.config, "accel_mode", None)
+        use_v2_model = getattr(study.config, "use_v2_sentiment", True)
+        v2_meta = {"available": False, "device": "rule_fallback", "fallbackReason": "disabled"}
+        if use_v2_model and study.core:
+            try:
+                import v2_runtime
+
+                texts = [study.rows[i]["focus"] for i in study.core]
+                sent_preds, v2_meta = v2_runtime.classify_sentiment_batch_v2(texts, accel_override=accel_override)
+                if sent_preds and len(sent_preds) == len(study.core):
+                    for idx, pred in zip(study.core, sent_preds, strict=True):
+                        result[idx]["sent"] = pred
+                        # Ensure opinion evidence spans exist for positive/negative/mixed/neutral docs
+                        if pred["label"] in ("正面", "负面", "含混", "中性") and not result[idx]["opinion"]:
+                            txt = study.rows[idx]["focus"]
+                            first_sent = next(semantics.sentences(txt), None)
+                            if first_sent:
+                                s0, s1, sent_txt = first_sent
+                                result[idx]["opinion"] = [{
+                                    "start": s0, "end": min(s1, s0 + 260), "sentence": sent_txt[:260],
+                                    "label": pred["label"], "coordinate_space": "focus", "method": pred["method"],
+                                }]
+            except Exception as exc:
+                v2_meta = {"available": False, "device": "rule_fallback", "fallbackReason": f"{type(exc).__name__}: {str(exc)[:100]}"}
+        study._v2_sentiment_meta = v2_meta
+        return result
     return study._artifact("semantic_signals", build)
 
 
@@ -191,6 +243,7 @@ def sentiment(study, mid, ids, filters):
     result["by_day"] = [row(group, date=label) for label, group in sorted(groups_for(study.rows, ids, "day").items())]
     result["by_source"] = [row(group, source=label) for label, group in sorted(groups_for(study.rows, ids, "source_id").items())]
     result["methods"] = dict(Counter(sig[i]["sent"]["method"] for i in ids))
+    result["runtime"] = getattr(study, "_v2_sentiment_meta", None)
     result["target"] = "in_scope_discussion"
     size = result["denominator"] if mid == "SL09" else sum(item["documents"] for item in result["labels"]
                                                           if item["label"] in {"negative", "positive", "mixed", "neutral"})

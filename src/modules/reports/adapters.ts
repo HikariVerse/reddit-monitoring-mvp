@@ -479,6 +479,8 @@ export async function adaptExploreAnalysis(
   const p10 = panelById.get("P10");
   const p11 = panelById.get("P11");
   const p12 = panelById.get("P12");
+  const p13 = panelById.get("P13");
+  const p14 = panelById.get("P14");
 
   const refJobs: Array<() => Promise<void>> = [];
   const queueRef = (moduleId: string, obj: unknown, reason: string, groupLabel?: string, maxTake = 3) => {
@@ -514,8 +516,16 @@ export async function adaptExploreAnalysis(
     return termStr ? `话题 ${idx + 1}：${termStr}`.slice(0, 32) : `讨论话题 ${idx + 1}`;
   };
 
-  // P05 topics
-  for (const [idx, row] of asArray(findMetric(p05, "SR08")?.data.topics).slice(0, 3).entries()) {
+  const sortTopicsDesc = (rows: Record<string, unknown>[]) =>
+    [...rows].sort((a, b) => {
+      const diff = asNum(b.documents ?? b.size ?? b.count) - asNum(a.documents ?? a.size ?? a.count);
+      if (diff !== 0) return diff;
+      return String(a.topic_id ?? a.topic_label ?? "").localeCompare(String(b.topic_id ?? b.topic_label ?? ""));
+    });
+
+  // P05 topics (sorted descending by document volume so top topics always lead evidence & KPI)
+  const sortedP05Topics = sortTopicsDesc(asArray(findMetric(p05, "SR08")?.data.topics));
+  for (const [idx, row] of sortedP05Topics.slice(0, 4).entries()) {
     const label = formatTopicLabel(row, idx);
     queueRef("topic_clusters", row, `主题代表讨论（${label}）`, label, 2);
   }
@@ -545,6 +555,28 @@ export async function adaptExploreAnalysis(
   // P03 top group fallback evidence
   for (const row of asArray(findMetric(p03, "SR01")?.data.groups).slice(0, 2)) {
     queueRef("community_audience", row, `高频社区代表讨论（${String(row.group ?? "")}）`, String(row.group ?? ""), 2);
+  }
+  // P13 brand competition evidence (MI05/MI14)
+  for (const row of asArray(findMetric(p13, "MI05")?.data.brands).slice(0, 3)) {
+    queueRef("brand_competition", row, `品牌讨论代表原文（${String(row.brand ?? "")}）`, String(row.brand ?? ""), 2);
+  }
+  for (const row of asArray(findMetric(p13, "MI14")?.data.pairs).slice(0, 3)) {
+    const pairLbl = `${String(row.brand_a ?? "")} vs ${String(row.brand_b ?? "")}`;
+    queueRef("brand_competition", row, `直接竞品对比代表原文（${pairLbl}）`, pairLbl, 2);
+  }
+  // P14 attribute sentiment / matrix / scenarios / workarounds evidence (PR07/MI19/PR13/OD16)
+  for (const row of asArray(findMetric(p14, "PR07")?.data.attributes).slice(0, 3)) {
+    queueRef("brand_attribute_matrix", row, `属性负面口碑代表原文（${String(row.attribute ?? "")}）`, String(row.attribute ?? ""), 2);
+  }
+  for (const row of asArray(findMetric(p14, "MI19")?.data.cells).slice(0, 3)) {
+    const cellLbl = `${String(row.brand ?? "")} × ${String(row.attribute ?? "")}`;
+    queueRef("brand_attribute_matrix", row, `品牌属性反馈代表原文（${cellLbl}）`, cellLbl, 2);
+  }
+  for (const row of asArray(findMetric(p14, "PR13")?.data.scenarios).slice(0, 3)) {
+    queueRef("scenario_workaround", row, `使用场景需求代表原文（${String(row.scenario ?? "")}）`, String(row.scenario ?? ""), 2);
+  }
+  for (const row of asArray(findMetric(p14, "OD16")?.data.categories).slice(0, 2)) {
+    queueRef("scenario_workaround", row, `用户变通方案代表原文（${String(row.category ?? "")}）`, String(row.category ?? ""), 2);
   }
 
   // Run evidence pulls in small batches of 4
@@ -725,15 +757,27 @@ export async function adaptExploreAnalysis(
     warnings: [],
   });
 
-  // P05 Topics
+  // P05 Topics (sorted descending by volume; preserve low-support clusters in an explicit tail bucket when corpus >= 40)
   const sr08 = findMetric(p05, "SR08");
-  const topicRows = asArray(sr08?.data.topics).slice(0, 10);
+  const rawTopicRows = sortTopicsDesc(asArray(sr08?.data.topics));
+  const minMainCluster = sp.analyzedDocuments >= 60 ? Math.max(3, Math.min(5, Math.floor(sp.analyzedDocuments * 0.006))) : 1;
+  const mainTopics = rawTopicRows.filter((tr) => asNum(tr.documents ?? tr.size ?? tr.count) >= minMainCluster);
+  const tailTopics = rawTopicRows.filter((tr) => asNum(tr.documents ?? tr.size ?? tr.count) < minMainCluster);
+  const tailDocs = tailTopics.reduce((sum, tr) => sum + asNum(tr.documents ?? tr.size ?? tr.count), 0);
+  const topicRows = (mainTopics.length > 0 ? mainTopics : rawTopicRows).slice(0, 10);
+  const chartLabels = topicRows.map((tr, idx) => formatTopicLabel(tr, idx));
+  const chartCounts = topicRows.map((tr) => asNum(tr.documents ?? tr.size ?? tr.count));
+  if (mainTopics.length > 0 && tailDocs > 0) {
+    chartLabels.push(`其他零散讨论（${tailTopics.length} 个小簇）`);
+    chartCounts.push(tailDocs);
+  }
+  const topTopicCount = topicRows[0] ? asNum(topicRows[0].documents ?? topicRows[0].size ?? topicRows[0].count) : 0;
   const p05State = mapMetricState(sr08?.state);
   sectionsById.set("topic_clusters", {
     id: "topic_clusters",
     moduleId: "topic_clusters",
     title: "核心关注话题与代表观点",
-    description: "基于语义聚类的核心讨论话题构成",
+    description: "基于语义聚类的核心讨论话题构成（按文档数降序排列）",
     scopeId,
     state: p05State,
     stateMessage: friendlyStateMessage(p05State, sr08?.reason ?? ""),
@@ -742,8 +786,8 @@ export async function adaptExploreAnalysis(
     denominatorLabel: "有效去重样本",
     sampleCount: sr08?.selected_documents ?? sp.analyzedDocuments,
     metrics: [
-      { id: "M_TOPIC_CNT", label: "识别主题簇", value: topicRows.length, formatted: fmtInt(topicRows.length), unit: "个" },
-      ...(topicRows[0] ? [{ id: "M_TOP_TOPIC", label: "最大话题规模", value: asNum(topicRows[0].documents ?? topicRows[0].size), formatted: fmtInt(asNum(topicRows[0].documents ?? topicRows[0].size)), unit: "条" }] : []),
+      { id: "M_TOPIC_CNT", label: "核心主题簇", value: topicRows.length, formatted: fmtInt(topicRows.length), unit: "个" },
+      ...(topicRows[0] ? [{ id: "M_TOP_TOPIC", label: "最大话题规模", value: topTopicCount, formatted: fmtInt(topTopicCount), unit: "条" }] : []),
     ],
     charts: topicRows.length
       ? [
@@ -752,15 +796,18 @@ export async function adaptExploreAnalysis(
             title: "核心话题分布",
             kind: "horizontal_bar",
             unit: "条",
-            xLabels: topicRows.map((tr, idx) => formatTopicLabel(tr, idx)),
-            series: [{ name: "样本数", data: topicRows.map((tr) => asNum(tr.documents ?? tr.size ?? tr.count)), color: "#0f766e" }],
+            xLabels: chartLabels,
+            series: [{ name: "样本数", data: chartCounts, color: "#0f766e" }],
             evidenceIds: evidenceByModule.get("topic_clusters") ?? [],
           },
         ]
       : [],
     evidenceIds: evidenceByModule.get("topic_clusters") ?? [],
-    method: sp.potionModelReady ? "Potion INT8 语义向量聚类 + c-TF-IDF 主题词抽取。" : "基于词项分布的话题聚类（未加载语义向量模型）。",
-    warnings: !sp.potionModelReady ? ["语义向量模型未就绪，已降级为词频主题分析。"] : [],
+    method: sp.potionModelReady ? "语义向量聚类 + c-TF-IDF 主题词抽取（按文档量降序）。" : "基于词项分布的话题聚类（未加载语义向量模型）。",
+    warnings: [
+      ...(!sp.potionModelReady ? ["语义向量模型未就绪，已降级为词频主题分析。"] : []),
+      ...(mainTopics.length > 0 && tailDocs > 0 ? [`已将 ${tailTopics.length} 个低支持微簇（共 ${tailDocs} 条）归入「其他零散讨论」，保留完整分母与成员证据。`] : []),
+    ],
   });
 
   // P06 Temporal Rhythm
@@ -832,27 +879,33 @@ export async function adaptExploreAnalysis(
     warnings: anomalyEvents.length === 0 ? ["当前时间窗内未检测到显著超出基线的声量突发异常。"] : [],
   });
 
-  // P09 Sentiment
+  // P09 Sentiment (SL07 + SL09 + SL08 Net Sentiment Index)
   const sl07 = findMetric(p09, "SL07");
   const sl09 = findMetric(p09, "SL09");
+  const sl08 = findMetric(p09, "SL08");
   const sentDist = asArray(sl07?.data.labels ?? sl07?.data.distribution);
   const negRate = asNum(sl09?.data.negative_rate ?? sl09?.data.rate);
+  const netSent = typeof sl08?.data.net_sentiment === "number" ? sl08.data.net_sentiment : null;
+  const sentRuntime = (sl07?.data.runtime as { device?: string; model?: string; weightFile?: string } | undefined) ?? undefined;
   const p09State = mapMetricState(sl07?.state);
   // Reuse sentLabelZh declared above for P09 sentiment labels
   sectionsById.set("sentiment_reputation", {
     id: "sentiment_reputation",
     moduleId: "sentiment_reputation",
     title: "消费者口碑与情感态度",
-    description: "正负情感构成、负面率与代表观点（未判情感单列）",
+    description: "正负情感构成、净情感指数（SL08）、负面率与代表观点（未判情感单列）",
     scopeId,
     state: p09State,
     stateMessage: friendlyStateMessage(p09State, sl07?.reason ?? ""),
-    engineSource: "Explore P09 (SL07/SL09)",
+    engineSource: "Explore P09 (SL07/SL08/SL09)",
     unit: "条",
     denominatorLabel: "有效去重样本",
     sampleCount: sl07?.selected_documents ?? sp.analyzedDocuments,
     metrics: [
-      { id: "M_NEG_RATE", label: "负面评价占比", value: negRate, formatted: fmtPct(negRate), unit: "", denominator: "明确情感样本" },
+      { id: "M_NEG_RATE", label: "负面评价占比", value: negRate, formatted: fmtPct(negRate), unit: "", denominator: "明确正负评价" },
+      ...(netSent !== null
+        ? [{ id: "M_NET_SENTIMENT", label: "净情感指数 (SL08)", value: netSent, formatted: netSent >= 0 ? `+${netSent.toFixed(2)}` : netSent.toFixed(2), unit: "", denominator: "明确正负评价 [-1,+1]" }]
+        : []),
       ...sentDist.slice(0, 4).map((row) => ({
         id: `M_SENT_${String(row.label ?? "x").toUpperCase()}`,
         label: sentLabelZh[String(row.label ?? "")] ?? String(row.label ?? ""),
@@ -875,7 +928,9 @@ export async function adaptExploreAnalysis(
         ]
       : [],
     evidenceIds: evidenceByModule.get("sentiment_reputation") ?? [],
-    method: "情感极性分类，明确将无法判定情感的客观陈述单列为“未判情感”，不混入中性。",
+    method: sentRuntime?.model
+      ? `多语上下文情感模型（${sentRuntime.device === "gpu" ? "GPU FP16 加速" : "CPU INT8"}），结合转折分句含混识别与客观信息门控；净情感指数 (正-负)/(正+负)。`
+      : "情感极性分类，明确将无法判定情感的客观陈述单列为“未判情感”，不混入中性。",
     warnings: [],
   });
 
@@ -1049,6 +1104,251 @@ export async function adaptExploreAnalysis(
     evidenceIds: evidenceByModule.get("price_purchase") ?? [],
     method: "分币种与计费周期抽取金额提及；购买阶段基于文本多标签表达，不代表实际交易转化率。",
     warnings: ["文本中的价格与购买意向信号不等同于实际电商销量或成交价格。"],
+  });
+
+  // P13 Brand Competition & Direct Comparison (MI05, MI06, MI07, MI14, MI13)
+  const mi05 = findMetric(p13, "MI05");
+  const mi06 = findMetric(p13, "MI06");
+  const mi07 = findMetric(p13, "MI07");
+  const mi14 = findMetric(p13, "MI14");
+  const mi13 = findMetric(p13, "MI13");
+  const brandRows = asArray(mi06?.data.brands ?? mi05?.data.brands).slice(0, 10);
+  const compPairs = asArray(mi14?.data.pairs).slice(0, 10);
+  const coEdges = asArray(mi13?.data.edges).slice(0, 8);
+  const brandCovRate = asNum(mi07?.data.coverage_rate);
+  const brandUnmatchedRate = asNum(mi07?.data.unmatched_rate);
+  const p13State = mapMetricState(mi05?.state ?? mi07?.state);
+  const relZh: Record<string, string> = { switch: "切换/替换", alternative: "平替/优劣对比", compare: "直接对比" };
+  sectionsById.set("brand_competition", {
+    id: "brand_competition",
+    moduleId: "brand_competition",
+    title: "品牌格局与竞品比较",
+    description: "样本品牌声量份额（MI05/MI06）、品牌提及覆盖率（MI07）与同句直接竞品对比（MI14）",
+    scopeId,
+    state: p13State,
+    stateMessage: friendlyStateMessage(p13State, mi05?.reason ?? ""),
+    engineSource: "Explore P13 (MI05/MI06/MI07/MI14/MI13)",
+    unit: "篇",
+    denominatorLabel: `有效去重样本 N=${sp.analyzedDocuments}`,
+    sampleCount: mi05?.selected_documents ?? sp.analyzedDocuments,
+    metrics: [
+      { id: "M_BRAND_COUNT", label: "识别品牌数", value: asNum(mi07?.data.distinct_brands) || brandRows.length, formatted: fmtInt(asNum(mi07?.data.distinct_brands) || brandRows.length), unit: "个" },
+      { id: "M_BRAND_COV", label: "品牌提及覆盖率", value: brandCovRate, formatted: fmtPct(brandCovRate), unit: "", denominator: "有效去重样本" },
+      ...(brandRows[0]
+        ? [{ id: "M_TOP_BRAND_SOV", label: `声量份额 Top1 (${String(brandRows[0].brand)})`, value: asNum(brandRows[0].sov_share), formatted: fmtPct(asNum(brandRows[0].sov_share)), unit: "", denominator: "已识别品牌提及总量" }]
+        : []),
+      { id: "M_DIRECT_COMP_EDGES", label: "直接竞品对比对", value: compPairs.length, formatted: fmtInt(compPairs.length), unit: "组" },
+    ],
+    charts: [
+      ...(brandRows.length
+        ? [
+            {
+              id: "C_P13_BRAND_SOV",
+              title: "样本品牌声量排行（MI05/MI06）",
+              subtitle: `品牌提及覆盖率 ${fmtPct(brandCovRate)} · 未匹配品牌 ${fmtPct(brandUnmatchedRate)}`,
+              kind: "horizontal_bar" as const,
+              unit: "篇",
+              xLabels: brandRows.map((b) => `${String(b.brand)} (${fmtPct(asNum(b.sov_share))})`),
+              series: [{ name: "提及篇数", data: brandRows.map((b) => asNum(b.documents)), color: "#0f766e" }],
+              evidenceIds: evidenceByModule.get("brand_competition") ?? [],
+            },
+          ]
+        : []),
+      ...(compPairs.length
+        ? [
+            {
+              id: "C_P13_DIRECT_COMP",
+              title: "同句直接竞品对比与切换关系（MI14，已与普通共提分层）",
+              kind: "table" as const,
+              unit: "篇",
+              xLabels: [],
+              series: [],
+              table: {
+                columns: ["竞品关系", "比较类型", "命中篇数"],
+                rows: compPairs.map((p) => [
+                  p.direction === "directed" ? `${String(p.brand_a)} → ${String(p.brand_b)}` : `${String(p.brand_a)} vs ${String(p.brand_b)}`,
+                  relZh[String(p.relation_type ?? "")] ?? String(p.relation_type ?? ""),
+                  fmtInt(asNum(p.documents)),
+                ]),
+              },
+              evidenceIds: evidenceByModule.get("brand_competition") ?? [],
+            },
+          ]
+        : []),
+      ...(!compPairs.length && coEdges.length
+        ? [
+            {
+              id: "C_P13_COOCCUR",
+              title: "文档级品牌共提关联（MI13，非直接比较）",
+              kind: "table" as const,
+              unit: "篇",
+              xLabels: [],
+              series: [],
+              table: {
+                columns: ["共提品牌对", "共提篇数", "Lift", "NPMI"],
+                rows: coEdges.map((e) => [
+                  `${String(e.brand_a)} × ${String(e.brand_b)}`,
+                  fmtInt(asNum(e.co_documents)),
+                  typeof e.lift === "number" ? e.lift.toFixed(2) : "—",
+                  typeof e.npmi === "number" ? e.npmi.toFixed(2) : "—",
+                ]),
+              },
+            },
+          ]
+        : []),
+    ],
+    evidenceIds: evidenceByModule.get("brand_competition") ?? [],
+    method: "基于规范品牌别名词表与语境消歧守卫统计样本品牌份额（严格加总 100%）；MI14 仅抽取同句显式比较/切换关系，与 MI13 文档共提网络严格分层。",
+    warnings: [
+      "样本品牌声量份额仅反映当前检索语料中的讨论分布，不等同于真实市场销量份额；未识别品牌的讨论不可直接推断为未决定购买。",
+    ],
+  });
+
+  // P14 Brand × Attribute Sentiment Matrix & Attribute Negative Rate (MI19, PR07, SL08)
+  const pr07 = findMetric(p14, "PR07");
+  const mi19 = findMetric(p14, "MI19");
+  const attrRows = asArray(pr07?.data.attributes).slice(0, 10);
+  const ratedAttrs = attrRows.filter((a) => typeof a.negative_rate === "number");
+  const hmBrands = asArray<string>(mi19?.data.brands).slice(0, 7);
+  const hmAttrs = asArray<string>(mi19?.data.attributes).slice(0, 7);
+  const hmCells = asArray(mi19?.data.cells);
+  const hmValues: Array<[number, number, number]> = [];
+  for (const c of hmCells) {
+    const xi = hmAttrs.indexOf(String(c.attribute ?? ""));
+    const yi = hmBrands.indexOf(String(c.brand ?? ""));
+    if (xi >= 0 && yi >= 0 && typeof c.net_sentiment === "number") {
+      hmValues.push([xi, yi, Number(c.net_sentiment.toFixed(2))]);
+    }
+  }
+  const p14AttrState = mapMetricState(mi19?.state ?? pr07?.state);
+  sectionsById.set("brand_attribute_matrix", {
+    id: "brand_attribute_matrix",
+    moduleId: "brand_attribute_matrix",
+    title: "品牌属性口碑与净情感",
+    description: "基于分句目标归属的品牌×属性净情感热力矩阵（MI19）与品类属性负面率（PR07）",
+    scopeId,
+    state: p14AttrState,
+    stateMessage: friendlyStateMessage(p14AttrState, mi19?.reason ?? pr07?.reason ?? ""),
+    engineSource: "Explore P14 (MI19/PR07/SL08)",
+    unit: "净情感",
+    denominatorLabel: "属性/品牌明确正负评价分母",
+    sampleCount: pr07?.selected_documents ?? sp.analyzedDocuments,
+    metrics: [
+      ...(netSent !== null
+        ? [{ id: "M_OVERALL_NSI", label: "样本净情感指数 (SL08)", value: netSent, formatted: netSent >= 0 ? `+${netSent.toFixed(2)}` : netSent.toFixed(2), unit: "", denominator: "明确正负评价" }]
+        : []),
+      ...(ratedAttrs[0]
+        ? [{ id: "M_TOP_NEG_ATTR", label: `最高负面率属性 (${String(ratedAttrs[0].attribute)})`, value: asNum(ratedAttrs[0].negative_rate), formatted: fmtPct(asNum(ratedAttrs[0].negative_rate)), unit: "", denominator: `n=${asNum(ratedAttrs[0].opinion_denominator)}` }]
+        : []),
+      { id: "M_MATRIX_CELLS", label: "有效品牌×属性格", value: hmValues.length, formatted: fmtInt(hmValues.length), unit: "格" },
+    ],
+    charts: [
+      ...(hmValues.length >= 2
+        ? [
+            {
+              id: "C_P14_BRAND_ATTR_HEATMAP",
+              title: "品牌 × 属性净情感热力矩阵（MI19，范围 -1 至 +1）",
+              subtitle: "按分句目标归属聚合，绿色偏正向、红色偏负向",
+              kind: "heatmap" as const,
+              unit: "NSI",
+              xLabels: hmAttrs,
+              series: [],
+              heatmap: {
+                xLabels: hmAttrs,
+                yLabels: hmBrands,
+                values: hmValues,
+              },
+              evidenceIds: evidenceByModule.get("brand_attribute_matrix") ?? [],
+            },
+          ]
+        : []),
+      ...(ratedAttrs.length
+        ? [
+            {
+              id: "C_P14_ATTR_NEG_RATE",
+              title: "品类属性负面率排行（PR07，%）",
+              subtitle: "负面评价 / (正面评价 + 负面评价)，已过滤无明确极性句段",
+              kind: "horizontal_bar" as const,
+              unit: "%",
+              xLabels: ratedAttrs.slice(0, 8).map((a) => `${String(a.attribute)} (n=${asNum(a.opinion_denominator)})`),
+              series: [{ name: "属性负面率 (%)", data: ratedAttrs.slice(0, 8).map((a) => Number((asNum(a.negative_rate) * 100).toFixed(1))), color: "#dc2626" }],
+              evidenceIds: evidenceByModule.get("brand_attribute_matrix") ?? [],
+            },
+          ]
+        : []),
+    ],
+    evidenceIds: evidenceByModule.get("brand_attribute_matrix") ?? [],
+    method: "按转折与标点拆句，在同分句内绑定品牌与属性极性（避免同帖夸 A 贬 B 串味）；净情感指数 = (正-负)/(正+负)。",
+    warnings: hmCells.some((c) => c.low_support)
+      ? ["部分品牌×属性单元格明确正负评价少于 3 条（低支持量），解读时请结合代表原文。"]
+      : [],
+  });
+
+  // P14 Usage Scenarios & User Workarounds (PR13, OD16)
+  const pr13 = findMetric(p14, "PR13");
+  const od16 = findMetric(p14, "OD16");
+  const scenRows = asArray(pr13?.data.scenarios).slice(0, 10);
+  const workCases = asArray(od16?.data.cases).slice(0, 8);
+  const workDocs = asNum(od16?.data.documents);
+  const p14ScenState = mapMetricState(pr13?.state ?? od16?.state);
+  sectionsById.set("scenario_workaround", {
+    id: "scenario_workaround",
+    moduleId: "scenario_workaround",
+    title: "使用场景需求与用户变通方案",
+    description: "区分全部场景提及与场景内主动需求（PR13），并提取用户自制/替代变通方案（OD16）",
+    scopeId,
+    state: p14ScenState,
+    stateMessage: friendlyStateMessage(p14ScenState, pr13?.reason ?? ""),
+    engineSource: "Explore P14 (PR13/OD16)",
+    unit: "篇",
+    denominatorLabel: `有效去重样本 N=${sp.analyzedDocuments}`,
+    sampleCount: pr13?.selected_documents ?? sp.analyzedDocuments,
+    metrics: [
+      { id: "M_SCEN_COVERED", label: "命中场景文档", value: asNum(pr13?.data.covered_documents), formatted: fmtInt(asNum(pr13?.data.covered_documents)), unit: "篇" },
+      ...(scenRows[0]
+        ? [{ id: "M_TOP_SCENARIO", label: `核心场景 (${String(scenRows[0].scenario)})`, value: asNum(scenRows[0].documents), formatted: fmtInt(asNum(scenRows[0].documents)), unit: "篇" }]
+        : []),
+      { id: "M_WORKAROUND_DOCS", label: "用户变通方案", value: workDocs, formatted: fmtInt(workDocs), unit: "篇", denominator: `占样本 ${fmtPct(asNum(od16?.data.rate))}` },
+    ],
+    charts: [
+      ...(scenRows.length
+        ? [
+            {
+              id: "C_P14_SCENARIOS",
+              title: "高频使用场景与主动需求分布（PR13，多标签可重叠）",
+              kind: "horizontal_bar" as const,
+              unit: "篇",
+              xLabels: scenRows.slice(0, 8).map((s) => `${String(s.scenario)} (需求 ${asNum(s.demand_documents)})`),
+              series: [{ name: "场景提及篇数", data: scenRows.slice(0, 8).map((s) => asNum(s.documents)), color: "#2563eb" }],
+              evidenceIds: evidenceByModule.get("scenario_workaround") ?? [],
+            },
+          ]
+        : []),
+      ...(workCases.length
+        ? [
+            {
+              id: "C_P14_WORKAROUNDS",
+              title: "典型用户变通与自制替代方案（OD16，可验证产品机会线索）",
+              kind: "table" as const,
+              unit: "条",
+              xLabels: [],
+              series: [],
+              table: {
+                columns: ["变通类别", "解决状态", "用户做法摘录"],
+                rows: workCases.map((w) => [
+                  String(w.category ?? ""),
+                  w.resolution_status === "resolved" ? "已验证有效" : "绕行使用中",
+                  String(w.excerpt ?? "").slice(0, 120),
+                ]),
+              },
+              evidenceIds: evidenceByModule.get("scenario_workaround") ?? [],
+            },
+          ]
+        : []),
+    ],
+    evidenceIds: evidenceByModule.get("scenario_workaround") ?? [],
+    method: "多标签场景识别区分「普通提及」与「场景内明确需求/痛点」；变通方案基于 DIY、第三方配件与绕行规则抽取，产品改进建议均以「可验证线索」呈现。",
+    warnings: ["多标签场景不可直接相加；变通方案属于定性机会线索，建议结合后续用户访谈或小规模测试验证。"],
   });
 
   return {

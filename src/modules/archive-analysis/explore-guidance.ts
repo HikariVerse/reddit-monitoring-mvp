@@ -21,6 +21,8 @@ export const PANEL_SCENARIO_MAP: Record<ExplorePanelId, ExploreScenarioId> = {
   P10: "voice",
   P11: "voice",
   P12: "voice",
+  P13: "commercial",
+  P14: "commercial",
 };
 
 export const EXPLORE_SCENARIOS: Array<{
@@ -52,6 +54,12 @@ export const EXPLORE_SCENARIOS: Array<{
     title: "口碑、用户需求与商业机会",
     description: "识别观点情感与正负口碑、主动需求与功能请求、痛点簇、价格带与购买阶段。",
     panels: ["P09", "P10", "P11", "P12"],
+  },
+  {
+    id: "commercial",
+    title: "商业竞品、属性口碑与场景",
+    description: "拆解品牌声量份额、直接竞品比较与共提网络、品牌×属性情感矩阵、使用场景需求及用户变通方案。",
+    panels: ["P13", "P14"],
   },
 ];
 

@@ -508,9 +508,22 @@ export function ReportDetailView({
                 )}
 
                 {/* Charts */}
-                {sec.charts.map((ch) => (
-                  <ReportChartRenderer key={ch.id} chart={ch} onSelectEvidence={openEvidence} />
-                ))}
+                {sec.charts.map((ch) => {
+                  const mappedChart =
+                    ch.id === 'C_P05_TOPICS' && sec.narrative?.topicLabels?.length && ch.xLabels?.length
+                      ? {
+                          ...ch,
+                          xLabels: ch.xLabels.map((raw, i) => {
+                            if (raw.startsWith('其他零散讨论')) return raw;
+                            const found =
+                              sec.narrative?.topicLabels?.find((tl) => tl.groupId === raw || tl.groupId === `T${i + 1}`) ??
+                              sec.narrative?.topicLabels?.[i];
+                            return found?.label?.trim() ? found.label.trim() : raw;
+                          }),
+                        }
+                      : ch;
+                  return <ReportChartRenderer key={ch.id} chart={mappedChart} onSelectEvidence={openEvidence} />;
+                })}
 
                 {/* Verified Findings */}
                 {visibleFindings.length > 0 && (

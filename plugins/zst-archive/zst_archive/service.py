@@ -28,6 +28,7 @@ from .analytics import (
     analytics_runtime_status,
     get_analysis_progress,
     resolve_study_evidence,
+    warmup_runtime,
 )
 from .packages import discover_packages
 from .query import QuerySpec, discover_archive_fast, select_archive_threads
@@ -477,6 +478,8 @@ class Handler(BaseHTTPRequestHandler):
                     limit=int(data.get("limit") or 1000),
                     duckdb_config=duckdb_cfg,
                     run_id=str(data.get("runId") or "") or None,
+                    accel_mode=data.get("accelMode") if isinstance(data.get("accelMode"), str) else None,
+                    use_v2_sentiment=bool(data.get("useV2Sentiment", True)),
                 )
             self._respond(200, result)
         except ServiceError as error:
@@ -520,16 +523,26 @@ def main():
         parser.error(f"{key} must be an integer in [1, {maximum}]")
 
     config = {
-        "threads": str(budget("ARCHIVE_DUCKDB_THREADS", 2, 32)),
-        "memory_limit": os.environ.get("ARCHIVE_DUCKDB_MEMORY_LIMIT", "1536MB"),
-        "max_temp_directory_size": os.environ.get("ARCHIVE_DUCKDB_TEMP_LIMIT", "2GB"),
+        "threads": str(budget("ARCHIVE_DUCKDB_THREADS", 4, 32)),
+        "memory_limit": os.environ.get("ARCHIVE_DUCKDB_MEMORY_LIMIT", "4096MB"),
+        "max_temp_directory_size": os.environ.get("ARCHIVE_DUCKDB_TEMP_LIMIT", "4GB"),
     }
     for setting in ("memory_limit", "max_temp_directory_size"):
         if not re.fullmatch(r"[1-9][0-9]{0,5}(?:MB|GB)", config[setting]):
             parser.error(f"{setting} requires an integer followed by MB or GB")
-    with ArchiveServer((args.host, args.port), Path(root).resolve(), token.encode(),
-                       budget("ARCHIVE_QUERY_TIMEOUT_SECONDS", 7, 60),
-                       budget("ARCHIVE_MAX_CONCURRENT_QUERIES", 1, 4), config) as server:
+    root_path = Path(root).resolve()
+    # Background startup warmup (Potion + V2 ONNX + Parquet metadata) so cold-start cliff is eliminated
+    import threading as _threading
+    def _bg_warmup():
+        try:
+            _, pkgs = _cached_catalog(root_path)
+            warmup_runtime(pkgs)
+        except Exception:
+            pass
+    _threading.Thread(target=_bg_warmup, name="r4-warmup", daemon=True).start()
+    with ArchiveServer((args.host, args.port), root_path, token.encode(),
+                       budget("ARCHIVE_QUERY_TIMEOUT_SECONDS", 25, 120),
+                       budget("ARCHIVE_MAX_CONCURRENT_QUERIES", 3, 8), config) as server:
         server.serve_forever()
 
 

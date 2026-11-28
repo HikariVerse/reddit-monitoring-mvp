@@ -142,9 +142,12 @@ export function ResearchAllStudiesView({
 
       const sampleCount = p.data_summary?.item_count ?? 0;
       const batchCount = p.enabled_batch_count ?? 0;
-      const reportCount = reportStatsByProject.countMap.get(p.id) ?? 0;
+      const archiveRefCount = p.data_summary?.archive_ref_count ?? 0;
+      const reportAnalyzed = p.data_summary?.latest_report_analyzed_count ?? 0;
+      const reportSourceKind = p.data_summary?.latest_report_source_kind ?? null;
+      const reportCount = Math.max(reportStatsByProject.countMap.get(p.id) ?? 0, p.data_summary?.report_count ?? 0);
 
-      let materialLabel = t('Not counted yet', '资料量未统计');
+      let materialLabel = t('No samples yet', '暂无样本');
       if (linkedMonitor) {
         materialLabel = linkedMonitor.enabled
           ? t('Monitor · Active', '持续监测 · 运行中')
@@ -154,7 +157,17 @@ export function ResearchAllStudiesView({
           ? t('Schedule · Active', '周期计划 · 运行中')
           : t('Schedule · Paused', '周期计划 · 已暂停');
       } else if (sampleCount > 0) {
-        materialLabel = t(`${sampleCount.toLocaleString()} project items`, `${sampleCount.toLocaleString()} 条项目样本`);
+        materialLabel = t(`${sampleCount.toLocaleString()} project items`, `站内批次 · ${sampleCount.toLocaleString()} 条`);
+      } else if (reportAnalyzed > 0) {
+        const srcPrefix =
+          archiveRefCount > 0 || reportSourceKind === 'archive'
+            ? t('Archive', '历史归档')
+            : reportSourceKind === 'stories'
+              ? t('News feed', '行业资讯')
+              : t('Snapshot', '研究快照');
+        materialLabel = t(`${srcPrefix} · ${reportAnalyzed.toLocaleString()} analyzed`, `${srcPrefix} · 已分析 ${reportAnalyzed.toLocaleString()} 条`);
+      } else if (archiveRefCount > 0) {
+        materialLabel = t(`${archiveRefCount} archive scope(s)`, `历史归档 · ${archiveRefCount} 个范围`);
       } else if (batchCount > 0) {
         materialLabel = t(`${batchCount} active batches`, `${batchCount} 个启用批次`);
       } else if (p.source_ids.length > 0) {
@@ -544,6 +557,7 @@ export function ResearchAllStudiesView({
             )}
           </div>
         ) : viewMode === 'list' ? (
+          <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
           <Table className="rs-table">
             <TableHeader>
               <TableRow className="rs-table-head-row">
@@ -620,6 +634,7 @@ export function ResearchAllStudiesView({
               })}
             </TableBody>
           </Table>
+          </div>
         ) : (
           <div className="rs-grid-view">
             {pageItems.map(({ project: p, meta }) => (

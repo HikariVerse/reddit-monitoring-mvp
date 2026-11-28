@@ -162,21 +162,22 @@ SCENARIO_KEYS = sorted(SCENARIO_TERMS.keys(), key=len, reverse=True)
 # 5. 痛点模式（正则 -> 痛点类型）
 # --------------------------------------------------------------------------- #
 PAIN_PATTERNS: list[tuple[str, str]] = [
-    ("故障损坏", r"\b(broke|broken|died|dead|stopped working|won'?t turn on|failed|defective|malfunction\w*)\b"),
-    ("质量差", r"\b(cheap(ly)? made|flimsy|creak\w*|fell apart|poor quality|build quality is (bad|poor))\b"),
-    ("不舒适", r"\b(hurt\w*|painful|uncomfortable|too tight|clamp\w*|ear fatigue|sore)\b"),
-    ("续航差", r"\b(battery (life )?(is )?(bad|poor|terrible|short)|dies (fast|quickly)|drain\w*)\b"),
-    ("连接问题", r"\b(disconnect\w*|dropout\w*|pairing (issue|problem|fail\w*)|won'?t pair|laggy)\b"),
+    ("故障损坏", r"\b(broke|broken|breaks?|died|dead|stopped working|won'?t turn on|failed|defective|malfunction\w*|leaks?|leaking|tangled|gets? stuck|snapped|cracked|chatter|rattle\w*|double[- ]typing|throws? an? error|error \d+)\b|报错|卡住|迷路|漏水|开裂|断了|损坏|故障|失灵|连击"),
+    ("质量差", r"\b(cheap(ly)? made|flimsy|creak\w*|fell apart|poor quality|build quality is (bad|poor)|atrocious build)\b|做工差|太脆弱|质量差"),
+    ("不舒适", r"\b(hurt\w*|painful|uncomfortable|too tight|clamp\w*|ear fatigue|sore|headache)\b|难受|头晕|耳压|闷热|压耳|夹头|不舒服|戴久了疼"),
+    ("续航差", r"\b(battery (life )?(is )?(bad|poor|terrible|short)|dies (fast|quickly)|(?:battery|power|token)\s+drain\w*|drains?\s+(?:fast|quickly|battery))\b|续航差|掉电快|充不进电"),
+    ("连接问题", r"\b(disconnect\w*(?!\s+switch)|dropout\w*|drops?\s+(?:constantly|frequently|randomly|connection)|pairing (issue|problem|fail\w*)|won'?t pair|laggy)\b|断连|连不上"),
     ("价格贵", r"\b(overpriced|too expensive|not worth|rip ?off|pricey|costs? too much)\b"),
-    ("软件问题", r"\b(app (is )?(buggy|broken|terrible)|firmware (issue|bug)|update broke|driver (issue|problem))\b"),
-    ("售后差", r"\b(customer service (is )?(bad|terrible|awful)|no support|warranty (denied|void)|rma)\b"),
+    ("软件问题", r"\b(app (is )?(buggy|broken|terrible)|firmware (issue|bug)|update broke|driver (issue|problem)|keeps? crash\w*|hallucinat\w*)\b|闪退|死机|崩溃|卡顿"),
+    ("售后差", r"\b(customer service (is )?(bad|terrible|awful)|no support|warranty (denied|void)|refused warranty|rma)\b|售后差|客服差"),
     ("尺寸不合", r"\b(too (big|small|large|tight|loose)|doesn'?t fit|fit issue)\b"),
-    ("功能缺失", r"\b(wish it had|no \w+ (mode|option|support)|missing \w+|lacks? \w+)\b"),
-    ("效果不符", r"\b(didn'?t work|doesn'?t work|no difference|not effective|useless|gimmick)\b"),
+    ("功能缺失", r"\b(wish it had|no \w+ (mode|option|support)|missing (?:a |an |the )?(?:feature|option|mode|support|setting|function)|lacks? (?:a |an )?(?:feature|option|mode|support))\b"),
+    ("效果不符", r"\b(didn'?t work|doesn'?t work|no difference|not effective|useless|gimmick|unusable)\b|难用"),
     ("退货后悔", r"\b(returned (it|them)|sent it back|refund|regret (buying|purchasing))\b"),
-    ("噪音大", r"\b(too loud|noisy|whine|humming)\b"),
-    ("发热", r"\b(overheat\w*|too hot|gets hot|heat issue)\b"),
-    ("兼容性", r"\b(not compatible|compatibility (issue|problem)|doesn'?t work with)\b"),
+    ("噪音大", r"\b(too loud|noisy|whine|humming|static (?:crackle|hiss|noise)|buzz\w*)\b|底噪|噪音大|嗡嗡|异响"),
+    ("发热", r"\b(overheat\w*|too hot|gets hot|heat issue)\b|发热|发烫"),
+    ("兼容性", r"\b(not compatible|compatibility (issue|problem)|doesn'?t work with)\b|不兼容|兼容问题"),
+    ("中文痛点", r"漏音|太重"),
 ]
 PAIN_RES = [(t, re.compile(p, re.I)) for t, p in PAIN_PATTERNS]
 
@@ -195,8 +196,9 @@ INTENT_RULES: dict[str, dict] = {
         r"\b(anyone (else )?(found|know) (a|any) (fix|way))\b",
     ]},
     "寻找替代品": {"group": "需求", "patterns": [
-        r"\b(alternatives? to|instead of|something (similar|like)|replace(ment)? for|equivalent (to|of))\b",
-        r"\b(what else (is|are) (there|out there))\b",
+        r"\b(alternatives? to|replacement for|better alternative|switch(?:ing)? away from)\b",
+        r"\b(?:buy|get|choose|pick|switch(?:ing)? to|looking for)\b.{0,30}\binstead of\b",
+        r"\bwhat else (is|are) (there|out there)\b|平替|替代品|替代方案",
     ]},
     "组合需求": {"group": "需求", "patterns": [
         r"\b(and also|but also|with (both|all)|needs? to (also|both)|combination of)\b",
@@ -291,14 +293,14 @@ CURRENCY_NORM = {"$": "USD", "usd": "USD", "dollar": "USD", "dollars": "USD", "b
 # --------------------------------------------------------------------------- #
 # 9. 情绪与评价词典（文档/实体/属性三级共用）
 # --------------------------------------------------------------------------- #
-POS_WORDS = set("""good great amazing awesome excellent love loved like liked nice best better worth perfect
+POS_WORDS = set("""good great amazing awesome excellent love loved liked nice best better worth perfect
 beautiful helpful thanks brilliant fantastic wonderful solid enjoy enjoyed recommend impressive super cool
 flawless comfortable comfy clean fast accurate reliable sturdy premium happy glad satisfied pleased
-完美 很好 不错 喜欢 优秀 感谢 很棒 舒服 满意 推荐 性价比 清晰 稳定 快""".split())
+完美 很好 不错 喜欢 优秀 感谢 很棒 舒服 满意 推荐 性价比 清晰 稳定 快 好用 惊艳 流畅 靠谱 值得""".split())
 NEG_WORDS = set("""bad worse worst terrible awful hate hated trash garbage shit sucks suck annoying broken bug bugs
 useless stupid disappointed disappointing sad angry wrong fail failed failure poor boring toxic scam waste
-overpriced expensive flimsy uncomfortable unusable defective regret refund returned
-垃圾 差 烂 讨厌 失望 生气 恶心 无语 崩溃 难用 错误 失败 问题 贵 退货 后悔""".split())
+overpriced expensive flimsy uncomfortable unusable defective regret refund returned frustrated ugly
+垃圾 差 烂 讨厌 失望 生气 恶心 无语 崩溃 难用 错误 失败 贵 退货 后悔 糟糕 拉垮 离谱 卡顿 压耳 难受""".split())
 NEGATORS = set("""not no never nor none cannot cant can't dont don't doesnt doesn't didnt didn't isnt isn't
 arent aren't wasnt wasn't werent weren't hardly barely without lack lacks lacking""".split())
 INTENSIFIERS = {"very": 1.4, "really": 1.35, "extremely": 1.6, "super": 1.45, "so": 1.3, "too": 1.35,
