@@ -843,6 +843,8 @@ export function ProjectsPage({
             onSelectProjectId(p.id);
             go(`/projects?view=overview&projectId=${encodeURIComponent(p.id)}`);
           }}
+          onEdit={(p) => openEdit(p)}
+          onDelete={(p) => void handleDelete(p)}
           onCreate={() => openCreate()}
           onNavigate={go}
         />

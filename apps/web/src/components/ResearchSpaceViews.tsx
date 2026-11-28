@@ -10,7 +10,6 @@ import {
   Database,
   Edit3,
   FileText,
-  FolderKanban,
   FolderPlus,
   Globe,
   Layers,
@@ -37,6 +36,7 @@ import { useI18n } from '../i18n/translations';
 import { Badge } from './ui/badge';
 import { ProjectBatchesView } from './ProjectWorkspaceViews';
 import { ReportLibraryView } from './reports/ReportLibraryView';
+export { ResearchAllStudiesView as ResearchListView } from './research/ResearchAllStudiesView';
 
 export type ProjectTabKey = 'summary' | 'batches' | 'overview' | 'jobs' | 'reports';
 
@@ -661,201 +661,6 @@ export function ProjectAnalysisHubHeader({
             <Search size={12} />
             <span>{t('Search Original Posts', '查看原文与讨论树')}</span>
           </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export function ResearchListView({
-  projects,
-  activeProjectId,
-  maxProjects,
-  isViewer,
-  monitors = [],
-  onOpenSummary,
-  onOpenAnalysis,
-  onCreate,
-  onNavigate,
-}: {
-  projects: Project[];
-  activeProjectId?: string;
-  maxProjects?: number;
-  isViewer: boolean;
-  monitors?: IntelMonitorDto[];
-  onOpenSummary: (project: Project) => void;
-  onOpenAnalysis: (project: Project) => void;
-  onCreate: () => void;
-  onNavigate: (path: string) => void;
-}) {
-  const { t } = useI18n();
-  const [category, setCategory] = useState<'all' | 'quick_research' | 'manual' | 'tracking'>('all');
-  const [search, setSearch] = useState('');
-  const reportsQuery = useReportsListQuery({ limit: 100 }, true);
-
-  const reportCountByProject = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const r of reportsQuery.data?.reports ?? []) {
-      if (r.projectId) map.set(r.projectId, (map.get(r.projectId) ?? 0) + 1);
-    }
-    return map;
-  }, [reportsQuery.data?.reports]);
-
-  const mine = projects.filter((p) => !p.is_shared);
-  const atLimit = isViewer && maxProjects !== undefined && mine.length >= maxProjects;
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return projects.filter((p) => {
-      const origin = resolveProjectOriginLabel(p, monitors, t);
-      if (category !== 'all' && origin.kind !== category) return false;
-      if (!q) return true;
-      return `${p.name} ${p.description ?? ''} ${p.research_goal ?? ''}`.toLowerCase().includes(q);
-    });
-  }, [category, monitors, projects, search, t]);
-
-  return (
-    <div style={{ display: 'grid', gap: 16 }}>
-      <div className="ds-card">
-        <div className="ds-card-hd" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <div className="ds-card-title">{t('All Research Studies', '全部研究')}</div>
-            <div className="ds-card-sub">
-              {isViewer && maxProjects !== undefined
-                ? t(`My studies: ${mine.length} / ${maxProjects} (plan limit)`, `我的私有研究：${mine.length} / ${maxProjects}（当前额度上限）`)
-                : t(`${projects.length} accessible studies`, `共 ${projects.length} 项可访问研究`)}
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <input
-              type="search"
-              className="wb-input"
-              style={{ width: 210, height: 32, fontSize: 12 }}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t('Filter studies by title or goal…', '按标题或研究目标筛选…')}
-            />
-            <button type="button" className="ds-btn ds-btn--ghost" onClick={() => onNavigate('/reports/new')}>
-              <FileText size={13} />
-              <span>{t('Create Report', '直接生成报告')}</span>
-            </button>
-            <button type="button" className="ds-btn" disabled={atLimit} onClick={onCreate}>
-              <Plus size={14} />
-              <span>{atLimit ? t('Study limit reached', '已达研究数上限') : t('New Study', '新建研究')}</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="ds-card-bd" style={{ display: 'grid', gap: 14 }}>
-          {/* Category Filter Pills */}
-          <div className="seg" role="tablist" aria-label={t('Study category', '研究分类')}>
-            {([
-              ['all', t('All', '全部研究')],
-              ['quick_research', t('Quick Research', '快速研究')],
-              ['manual', t('Topic Research', '专题研究')],
-              ['tracking', t('Continuous Tracking', '持续跟踪')],
-            ] as const).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={category === key}
-                className={category === key ? 'on' : ''}
-                onClick={() => setCategory(key)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {filtered.length === 0 ? (
-            <p className="collection-hint">
-              {search.trim()
-                ? t('No research studies match your filter.', '没有符合筛选条件的研究。')
-                : t('No research studies yet. Generate a report or create a new study to get started.', '还没有研究记录。可以直接发起报告（系统自动建项）或点击「新建研究」。')}
-            </p>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
-              {filtered.map((p) => {
-                const origin = resolveProjectOriginLabel(p, monitors, t);
-                const ds = p.data_summary;
-                const repCount = reportCountByProject.get(p.id) ?? 0;
-                const pid = encodeURIComponent(p.id);
-                return (
-                  <div
-                    key={p.id}
-                    className="ds-card"
-                    style={{
-                      padding: '14px 16px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between',
-                      gap: 10,
-                      borderColor: p.id === activeProjectId ? 'var(--wb-purple)' : undefined,
-                    }}
-                  >
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                        <button
-                          type="button"
-                          onClick={() => onOpenSummary(p)}
-                          style={{
-                            border: 0,
-                            background: 'none',
-                            padding: 0,
-                            textAlign: 'left',
-                            cursor: 'pointer',
-                            fontWeight: 700,
-                            fontSize: 13.5,
-                            color: 'var(--ink)',
-                          }}
-                        >
-                          {p.name}
-                        </button>
-                        <div style={{ display: 'inline-flex', gap: 4, flexShrink: 0, flexWrap: 'wrap' }}>
-                          <span className="tag" style={{ fontSize: 10 }}>{origin.label}</span>
-                          {p.is_shared && <span className="tag tag--mint" style={{ fontSize: 10 }}>{t('Shared', '共享')}</span>}
-                        </div>
-                      </div>
-                      {(p.research_goal || p.description) && (
-                        <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '6px 0 0', lineHeight: 1.45 }}>
-                          {(p.research_goal || p.description || '').slice(0, 110)}
-                        </p>
-                      )}
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8, fontSize: 11, color: 'var(--muted)' }}>
-                        <span>{t('Samples', '样本')}: <b>{(ds?.item_count ?? 0).toLocaleString()}</b></span>
-                        <span>·</span>
-                        <span>{t('Reports', '报告')}: <b>{repCount}</b></span>
-                        {ds?.platforms.map((plat) => (
-                          <span key={plat} className="tag tag--lilac" style={{ fontSize: 10 }}>{plat.toUpperCase()}</span>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', borderTop: '1px solid var(--line)', paddingTop: 10 }}>
-                      <button type="button" className="ds-btn" style={{ height: 27, fontSize: 11 }} onClick={() => onOpenSummary(p)}>
-                        <FolderKanban size={11} />
-                        <span>{t('Open Study', '打开研究')}</span>
-                      </button>
-                      <button type="button" className="ds-btn ds-btn--ghost" style={{ height: 27, fontSize: 11 }} onClick={() => onOpenAnalysis(p)}>
-                        <Compass size={11} />
-                        <span>{t('Analyze', '开展分析')}</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="ds-btn ds-btn--ghost"
-                        style={{ height: 27, fontSize: 11 }}
-                        onClick={() => onNavigate(repCount > 0 ? `/projects?view=reports&projectId=${pid}` : `/reports/new?projectId=${pid}`)}
-                      >
-                        <FileText size={11} />
-                        <span>{repCount > 0 ? t('View Reports', '查看报告') : t('Generate Report', '生成报告')}</span>
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       </div>
     </div>
