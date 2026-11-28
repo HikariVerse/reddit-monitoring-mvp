@@ -6,7 +6,6 @@ x-log-policy: &log-policy
 
 services:
   db:
-    mem_limit: 1350m
     logging: *log-policy
     image: postgres:16-alpine
     command:
@@ -42,7 +41,6 @@ services:
       retries: 30
     restart: unless-stopped
   app:
-    mem_limit: 1536m
     logging: *log-policy
     image: ${APP_IMAGE:-monitoring-local-app}
     build:
@@ -96,7 +94,6 @@ services:
       retries: 30
     restart: unless-stopped
   proxy:
-    mem_limit: 128m
     logging: *log-policy
     image: ${PROXY_IMAGE:-monitoring-local-proxy}
     build:

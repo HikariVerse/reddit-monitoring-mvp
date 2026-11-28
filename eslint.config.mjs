@@ -29,7 +29,7 @@ export default tseslint.config(
       },
     },
     rules: {
-      // Correctness, async safety, and mainline architectural boundaries
+      // Correctness and async safety
       "no-control-regex": "off",
       "@typescript-eslint/no-floating-promises": ["error", { ignoreVoid: true }],
       "@typescript-eslint/no-misused-promises": [
@@ -43,24 +43,6 @@ export default tseslint.config(
           varsIgnorePattern: "^_",
           caughtErrorsIgnorePattern: "^_",
           ignoreRestSiblings: true,
-        },
-      ],
-      "no-restricted-syntax": [
-        "error",
-        {
-          selector: "TSInterfaceDeclaration[id.name=/Repository$/]",
-          message:
-            "Avoid single-implementation *Repository abstractions; use named SQL functions with Pool | PoolClient.",
-        },
-        {
-          selector: "ClassDeclaration[id.name=/Repository$/]",
-          message:
-            "Avoid *Repository wrapper classes; use named SQL functions with Pool | PoolClient.",
-        },
-        {
-          selector: "ClassDeclaration[id.name=/^InMemory/]",
-          message:
-            "Avoid InMemory* repository fakes; test database behavior against isolated PG16.",
         },
       ],
       "@typescript-eslint/no-explicit-any": "warn",

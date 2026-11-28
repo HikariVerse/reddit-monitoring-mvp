@@ -1,5 +1,7 @@
 # 工作台组件盘点
 
+> **历史归档。** 本文保留原开发阶段的决策和验证背景。当前产品、状态和工程要求从仓库根 AGENTS.md 查阅。
+
 | 入口 | 现有实现 | 整合工作 |
 | --- | --- | --- |
 | 来源目录与新建 | SourcesPage、SourceDomainOverview、SourceEditor、SourceImportDialog | 保留真实操作与双领域重点，核对键盘、加载和业务状态 |

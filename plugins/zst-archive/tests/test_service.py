@@ -8,6 +8,7 @@ import pytest
 
 from fixture_pkg import create_synthetic_package
 from zst_archive import service
+from zst_archive.analytics import PANEL_IDS
 
 TOKEN = b"archive-fixture-token-" + b"f" * 32
 EMPTY = {"query": "", "subreddits": [], "from": None, "to": None}
@@ -104,12 +105,30 @@ def test_http_auth_timeout_and_recovery(archive: Path):
 
         try:
             for token in (None, b"wrong"):
-                with pytest.raises(HTTPError) as denied:
-                    get("archives", token)
-                assert denied.value.code == 401
-            assert get("health", TOKEN) == {"status": "ok"}
+                for operation in ("health", "archives"):
+                    with pytest.raises(HTTPError) as denied:
+                        get(operation, token)
+                    assert denied.value.code == 401
+            health = get("health", TOKEN)
+            assert health["status"] == "ok"
+            analytics = health["analytics"]
+            for key in ("available", "balancedReady", "potionModelReady"):
+                assert isinstance(analytics[key], bool)
+            assert analytics["panels"] == list(PANEL_IDS)
+            runtime = analytics["v2Runtime"]
+            assert isinstance(runtime, dict)
+            if analytics["balancedReady"]:
+                assert runtime["spacyEnReady"] is True
+            if runtime:
+                assert runtime["accelMode"] in {"off", "auto", "prefer_gpu"}
+                for key in ("spacyEnReady", "gpuAvailable", "cudaProviderAvailable", "v2SentimentReady"):
+                    assert isinstance(runtime[key], bool)
+                assert runtime["v2SentimentDevice"] in {"none", "cpu", "gpu"}
+                if runtime["v2SentimentDevice"] == "gpu":
+                    assert runtime["v2SentimentReady"] and runtime["gpuAvailable"] and runtime["cudaProviderAvailable"]
             with pytest.raises(HTTPError) as expired:
                 get("archives", TOKEN)
+            assert expired.value.code == 503
             assert json.load(expired.value)["code"] == "query_timeout"
             server.timeout = 10
             assert get("archives", TOKEN)["archiveId"] == service.ARCHIVE_ID

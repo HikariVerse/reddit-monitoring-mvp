@@ -100,15 +100,6 @@ module.exports = {
       },
     },
     {
-      name: "mainline-no-heavy-runtime-deps",
-      severity: "error",
-      comment: "Keep single-node 4 GB mainline free of ORMs, Redis/BullMQ, and headless browsers.",
-      from: { path: "^(src|apps/api/src|packages/contracts/src)/" },
-      to: {
-        path: "^node_modules/(prisma|@prisma/client|typeorm|drizzle-orm|bullmq|ioredis|playwright|puppeteer)(/|$)",
-      },
-    },
-    {
       name: "web-no-backend-imports",
       severity: "error",
       comment: "Frontend may import shared packages/contracts only, never backend src/ or apps/api/.",

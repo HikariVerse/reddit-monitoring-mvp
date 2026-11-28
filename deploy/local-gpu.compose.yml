@@ -1,0 +1,16 @@
+# Add after deploy/local.compose.yml on a machine with NVIDIA container support.
+services:
+  archive:
+    image: ${LOCAL_ARCHIVE_IMAGE:-siftline-local-archive:gpu}
+    build:
+      args:
+        INSTALL_GPU: "true"
+    environment:
+      ANALYTICS_ACCEL_MODE: ${ANALYTICS_ACCEL_MODE:-auto}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

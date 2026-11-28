@@ -1,5 +1,7 @@
 # 工作台组件与主题
 
+> **历史归档。** 本文保留原开发阶段的决策和验证背景。当前产品、状态和工程要求从仓库根 AGENTS.md 查阅。
+
 工作台运行于现有 React 19、Vite 8 和 TanStack Query 5。UI 源码取自 shadcn 的 Base Nova 注册表，运行时使用 Base UI 1.9.0，构建样式使用 Tailwind CSS 和 Vite 插件 4.3.5。依赖版本和锁文件在 Web workspace 中维护。分析继续使用原有 ECharts 6 和 Lucide。
 
 | 路径 | 职责 | 当前调用方 |

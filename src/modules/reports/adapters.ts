@@ -9,9 +9,7 @@ import { getMonitorOverview, listMonitorPosts, listResearchTasks, runL2ResearchC
 import { runL1ResearchOverview } from "../projects/index";
 import type {
   ModuleAvailabilityState,
-  ReportChartSpec,
   ReportEvidenceItem,
-  ReportMetricDatum,
   ReportScopeSummary,
   ReportSectionData,
 } from "./types";

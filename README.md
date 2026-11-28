@@ -1,35 +1,13 @@
 # SIFTLINE
 
-面向研究者与产品团队的**高价值讨论信息流**与 **Semrush 级社媒/GEO 智能监测平台**。全仓围绕 **Fastify 5 + TypeBox + PostgreSQL 16 + React 19** 构建，在单机 **4 GB RAM / 60 GB Disk** 预算内坚持零 ORM、零 Redis/BullMQ、零 Python/Chromium 主线运行。
+**面向跨境电商的多源数据研究与智能报告平台。** 从资讯、社媒、现有项目和历史 Reddit 归档发现资料，组织研究范围，查看统计和证据，生成可在线阅读或导出的研究报告。
 
-## 核心能力与研发路线
+- **报告与研究工作台**支持行业情报、电商市场、社媒舆情和自定义报告。资源发现、项目组织、补充采集、智能洞察和报告复用组成研究流程。
+- **多源数据与分析**使用 PostgreSQL 管理在线数据和权限，经独立 R4 服务查询 Parquet 与 DuckDB。探索提供消费者需求、品牌比较、价格与属性等分析，CPU 可独立运行并可选择 GPU。
+- **持续跟踪**提供资讯与社交信息流、AI 发布情报、监测器和周期报告。各运行环境的接线与实际验收见[当前状态](docs/status.md)。
 
-- **高价值讨论流与跨平台热榜（`/v1/feed/*` · `[LIVE]`）**：隔离新闻 RSS 与营销水帖，采用四池公平配额（个性化 / 全网热议 / 未知探索 / 6h 飙升）+ 14 天半衰期衰减 + Plackett-Luce 采样 + 滑动窗口打散 + 14 天已读防重，提供可解释推荐理由与跨平台百分位热度榜。
-- **Semrush 级社媒与 GEO 监测（`/v1/intelligence/*` · `[LIVE]`）**：覆盖 **关键词声量与外链 GEO 引用（SoV/Domain）**、**KOL 账号批量打包与作者画像**、**一揽子 Subreddit 象限矩阵与 7×24 热力图**，执行先估价（`estimate`）与跨出口累计日预算后采集（`collect`）。
-- **AI 发布情报中心（`/v1/ai/*` · `[LIVE]`）**：基于官方一手证据链与 `data/ai/history/v1/` 离线可验证基线，提供厂商时间矩阵、模型演进、评测榜单与全量审核/事件/凭证运维队列。
+## 开始使用
 
-## 快速开始
+本机选用完整 Compose 配置，按本机条件启用 GPU。轻量配置适用于资源受限的在线部署。启动、环境变量、测试和发布见[开发手册](docs/development.md#本机完整开发与验收)，归档入口见 [R4 使用说明](docs/r4-archive.md)。
 
-环境要求 **Node 24+** 与 **PostgreSQL 16**：
-
-```sh
-npm ci --ignore-scripts && npm --prefix apps/web ci --ignore-scripts
-npm run lint:policy && npm run lint:api && npm run lint:arch
-npm run typecheck && npm run check:openapi && npm run test:unit
-```
-
-隔离 PG16 集成测试、多阶段 Docker 构建（`--target runtime` / `--target proxy`）及生产运维规程详见[开发与运维手册](docs/development.md)。私有密钥仅存放于仓外环境文件，`git push` 不触发自动部署。
-
-## 文档导航（Single Source of Truth）
-
-| 文档 | 唯一管辖范围 |
-| :--- | :--- |
-| [产品边界与指标口径](docs/README.md) | 核心产品支柱、不做什么边界、2026-11-23 决议与度量诚实性铁律 |
-| [系统架构与边界](docs/architecture.md) | 4 GB 运行拓扑、模块化领域边界、单写表与凭证隔离、L1–L3/R4 与安全边界 |
-| [核心不变量台账](docs/invariants.md) | `INV-001`..`INV-010` 不可破坏约束与自动化 CI 门禁映射 |
-| [数据与 API 契约](docs/contracts.md) | 领域语义、鉴权/会话/MFA 契约、幂等导出、V2 BFF 摘要与 `check:openapi` 实测清单 |
-| [前端 V2 交互与视觉规范](docs/design.md) | 已部署界面盘点与 Frontend V2 重构蓝图（B1 信息流卡片 × B2 Semrush 监测台） |
-| [当前状态与缺口台账](docs/status.md) | 生产基线、`main` 主干、已完成修复项与 Stage 2 Frontend V2 演进路线 |
-| [开发与运维手册](docs/development.md) | 单主干协作、CI 路径分流、本地验证、Docker/Caddy/Tunnel、备份恢复与巡检 SQL |
-| [Backend V2 演进蓝图](docs/plans/backend-v2-blueprint.md) | 已审批的 Backend V2 数据底座、推荐算法、Semrush 监测与 5 切片交付规格 |
-| [Agent 协作与工程红线](AGENTS.md) | AI 与协作者开工必读红线、真源索引与 PR 质量原则 |
+开发从 [AGENTS.md](AGENTS.md) 开始。产品流程见[产品说明](docs/README.md)，用户入口见[导航与交互](docs/design.md)。本地交付和原始证据可从 `output/README.md` 查找。

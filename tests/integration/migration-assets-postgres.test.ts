@@ -123,6 +123,7 @@ test("PG16 upgrades applied 058 to the immutable batch migrations and safely rer
     "065_monitor_managed_sources.sql", "066_p0_p1_remediation.sql",
     "067_stage1_ai_credentials.sql", "068_collection_limits_and_tiers.sql",
     "069_research_tasks_and_cache.sql", "070_project_archive_references.sql",
+    "071_research_reports_and_orchestration.sql",
   ]);
   assert.deepEqual(await runMigrations({ pool: db.pool }), []);
   const after = await db.pool.query("SELECT filename,checksum FROM schema_migration ORDER BY filename");
@@ -176,6 +177,7 @@ test("PG16 upgrades main 060 to V2 without changing historical checksums or batc
     "065_monitor_managed_sources.sql", "066_p0_p1_remediation.sql",
     "067_stage1_ai_credentials.sql", "068_collection_limits_and_tiers.sql",
     "069_research_tasks_and_cache.sql", "070_project_archive_references.sql",
+    "071_research_reports_and_orchestration.sql",
   ]);
   const planLimits = (await db.pool.query("SELECT plan_tier, max_batch_limit FROM plan_collection_policy ORDER BY plan_tier")).rows;
   assert.deepEqual(planLimits, [

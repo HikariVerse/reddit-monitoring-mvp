@@ -1,75 +1,25 @@
-# R4 离线 Reddit 归档
+# R4 归档、分析与运行
 
-项目的「数据接入 → 离线 Reddit 归档」用于关联历史范围。工作台「探索」从外置 DuckDB 检索已关联的 Parquet。PostgreSQL 只存项目、来源、归档版本与筛选范围的引用。推流导入是独立的运维操作。
+R4 通过外置 DuckDB 只读访问分月 Parquet 与 SQLite FTS，并运行可选 Python 分析。PostgreSQL 保存业务、归档引用和研究快照。主线检查项目和来源权限后调用归档服务。
 
-## 1. 注册来源和授权
+## 连接与研究
 
-在「运维 → 来源管理」使用已有 Reddit R4 注册配置创建或选择一个活跃的 Reddit 推送来源。来源需要 `external_ingest`、`reddit-archive` 标签，调度关闭。记录来源 UUID，供主线的 `ARCHIVE_ANALYSIS_SOURCE_ID` 使用。单节点配置一个归档根目录和一个授权来源。
+1. 运维使用已验证的 Reddit R4 推送来源，配置 `external_ingest` 和 `reddit-archive` 标签，关闭来源调度。用该活跃来源 UUID 配置 `ARCHIVE_ANALYSIS_SOURCE_ID`。普通用户需要显式来源授权，项目读取和编辑各自按服务端权限验证。
+2. 在项目的「数据接入」检测归档连接，确认归档版本、可用月份、关键词或 Subreddit 与 UTC 时间窗。可用 AND/OR/NOT、引号短语和括号。预览后确认引用，同版本同范围可幂等复用。
+3. 从项目或探索页进入过滤检索、样本分析和证据。原帖报告评论数与实际已归档数分别显示；已归档内容可能是精选或截断。撤销来源授权、暂停或变更版本后需要按实际状态重新验证，解除关联不改变归档。
 
-管理员和 Owner 可使用该来源。普通用户需在现有运维策略中显式获得该来源的 `allowedSourceIds` 白名单权限，默认无权限。检索还需要项目可读，关联和解除关联需要项目可编辑。授权撤销、来源暂停或归档后，既有引用无法用于读取数据。独立的旧版推流机器密钥只给该来源和 `ingest` scope。
+归档根目录须为已准备好的分月包，每个包包含 `manifest.json`、`corpus/posts.parquet`、`corpus/comments.parquet` 与 `index/fts_*.sqlite`。保持同一版本文件静态。容器把目录只读挂载，独立凭证仅供主线与插件使用。跨节点使用私网、VPN 或 TLS。
 
-## 2. Windows 本机启动
+## 运行与设备
 
-依次在工作区安装应用依赖、完成 PG16 迁移，并安装外置 Python 插件。Python 需 3.11 或更高。
+优先用[本机完整 Compose](development.md#本机完整开发与验收)，它会把 API 指向 `http://archive:8765`。源代码运行时可在本机用 Python 3.11+ 安装插件 `python -m pip install "./plugins/zst-archive[analytics,balanced]"`，balanced 另需匹配的 spaCy 英文模型，镜像构建已提供该安装步骤。通过 `python -m zst_archive.cli inspect --archive-root <目录>` 检查归档。配置 `ARCHIVE_ROOT`、`ARCHIVE_SERVICE_TOKEN` 后在私有终端执行 `python -m zst_archive.service` 默认监听本机 `8765`。主线配置 `ARCHIVE_ANALYSIS_ENABLED=true`、`ARCHIVE_ANALYSIS_BASE_URL`、`ARCHIVE_ANALYSIS_SOURCE_ID`、`ARCHIVE_ANALYSIS_SERVICE_TOKEN`，最后一项与侧车 token 对应。
 
-```powershell
-npm ci --ignore-scripts
-npm --prefix apps/web ci --ignore-scripts
-npm run db:migrate
-python -m venv plugins/zst-archive/.venv
-$archivePython = './plugins/zst-archive/.venv/Scripts/python.exe'
-& $archivePython -m pip install ./plugins/zst-archive
-```
+| 场景 | 设置与检查 |
+|---|---|
+| CPU | `ANALYTICS_ACCEL_MODE=off`。装分析依赖并提供 INT8 权重时走 CPU ONNX，基础统计可独立完成。资源不足或模型缺失时查看实际档位和降级状态。 |
+| GPU | Compose GPU overlay 安装 GPU ONNX 和 CUDA 依赖，需要容器设备支持。 `auto` 或 `prefer_gpu` 探测 CUDA 和 FP16 权重。运行失败或显存不足时可回退 CPU，按实际元数据报告设备、权重和回退原因。 |
+| 调优 | 默认共享 CPU 预算来自 `BI_CPU_CORES=auto`，由实际可见逻辑线程减一；`BI_MAX_CONCURRENT_JOBS` 控制重分析并发。另按输入和 SQL 分别设置 `ARCHIVE_DUCKDB_THREADS`、`ARCHIVE_DUCKDB_MEMORY_LIMIT`、`ARCHIVE_DUCKDB_TEMP_LIMIT` 和查询并发/超时。主线请求超时应覆盖预期归档超时。 |
 
-在 PowerShell 设置归档根目录并运行 CLI 检查。该目录在插件机器上，需要包含一个或多个带 `manifest.json` 的月份子目录，内含现有 `corpus/posts.parquet`、`corpus/comments.parquet` 和 `index/fts_*.sqlite`。运营时建议使用 OS 只读文件权限。索引和源文件需按归档版本保持静态，发布新归档时同步更新 manifest。
+对归档服务的已鉴权 `GET /health` 返回 `status` 和 `analytics`，含 `available`、`balancedReady`、面板与 `v2Runtime` 信息。探测结果、单次实际推理和历史样本性能分别记录。归档版本变化、来源无权限、召回超限或资源不足按返回状态处理，详情见[契约](contracts.md)。
 
-```powershell
-$env:ARCHIVE_ROOT = Read-Host '输入插件所在机器上的归档根目录'
-& $archivePython -m zst_archive.cli inspect --archive-root $env:ARCHIVE_ROOT
-$env:ARCHIVE_SERVICE_TOKEN = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
-$env:ARCHIVE_DUCKDB_THREADS = '8'           # 默认 2，最大 32
-$env:ARCHIVE_DUCKDB_MEMORY_LIMIT = '32GB'  # 默认 1536MB，按机器资源调低或调高
-$env:ARCHIVE_DUCKDB_TEMP_LIMIT = '2GB'
-$env:ARCHIVE_QUERY_TIMEOUT_SECONDS = '7'  # 默认 7，最大 60
-$env:ARCHIVE_MAX_CONCURRENT_QUERIES = '1'   # 默认 1，最大 4
-```
-
-在该会话通过私有方式设置以下主线配置。归档服务凭证独立于站点会话密钥与推流密钥。示例使用同一 PowerShell 变量给两个进程供值，避免将凭证打印到日志或复制进项目文件。
-
-```powershell
-$env:ARCHIVE_ANALYSIS_ENABLED = 'true'   # 默认 false
-$env:ARCHIVE_ANALYSIS_SOURCE_ID = Read-Host '输入已启用的 R4 来源 UUID'
-$env:ARCHIVE_ANALYSIS_BASE_URL = 'http://127.0.0.1:8765'
-$env:ARCHIVE_ANALYSIS_SERVICE_TOKEN = $env:ARCHIVE_SERVICE_TOKEN
-$env:ARCHIVE_ANALYSIS_TIMEOUT_MS = '8500'
-Start-Process -FilePath (Resolve-Path $archivePython).Path -ArgumentList '-m','zst_archive.service' -WindowStyle Hidden
-# 使用本机开发环境的 DATABASE_URL、SESSION_SECRET 与前端 URL
-$env:APP_ORIGIN = 'http://localhost:5173'
-$env:ALLOW_HTTP_DEV = 'true'
-npm run app:api
-```
-
-在另一个 PowerShell 窗口启动 Web 开发服务器 `npm --prefix apps/web run dev`。在项目里检测归档连接。若启用了 PR #53 的连接超时修复，可视工作量配对调高插件与主线预算，例如插件 20 秒、主线 22 秒。较短的默认主线预算兼容原有 10 秒 Fastify socket 空闲限制。
-
-## 3. 可选容器部署
-
-```powershell
-docker build -t siftline-r4-local plugins/zst-archive
-docker run --rm --name siftline-r4-local --memory 4g --cpus 2 -p 127.0.0.1:8765:8765 --mount "type=bind,source=$env:ARCHIVE_ROOT,target=/archive,readonly" -e ARCHIVE_ROOT=/archive -e ARCHIVE_SERVICE_TOKEN -e ARCHIVE_QUERY_TIMEOUT_SECONDS=7 siftline-r4-local
-```
-
-这条命令用于宿主机主线。插件与容器化主线应共享受控的私有网络，由主线用插件容器名或私网地址连接。容器内的 `127.0.0.1` 指向容器自己。跨节点部署通过私网、VPN 或 TLS 保护服务凭证。主线默认镜像和 Compose 无需启动插件，也无需安装 Python 或 DuckDB。DuckDB 的内存设置是查询预算，生产资源隔离由容器或操作系统提供。
-
-## 4. 从项目接入和检索
-
-1. 打开「研究 → 数据接入 → 离线 Reddit 归档」，点击「检测连接」。核对真实版本和月份。
-2. 选择全部或指定月份，按需填关键词、Subreddit 和 UTC 起止时间。时间范围为左闭右开。布尔表达式支持正向词、`AND`、`OR`、`NOT`、引号短语与括号。过宽的 FTS 查询会明确要求收窄。
-3. 点击「检查与预览」，查看最多 5 个样本，然后确认关联。重复提交同一范围得到同一引用。
-4. 点击「进入探索」，检索、翻页或打开原文与讨论串。不同归档和附加筛选条件使用独立游标。详情分别显示原帖报告评论数和已归档评论数，并展示至多 15 条精选归档评论。包可能只保存精选评论或截断正文。
-5. 回到数据接入可解除关联。归档文件与历史推流写入由其各自的生命周期管理。
-
-定向排查时，未启用或未配置请查看环境变量，离线请查监听地址和私网连通性，凭证不匹配请检查两个进程的独立服务 token。无可用包、包损坏或文件路径越界请在插件节点执行 `inspect` 并核对 manifest、Parquet、FTS 文件和访问权限。归档版本变化后，在数据接入复核并确认新版本。忙碌、召回超限、临时文件额度或超时错误可通过重试或收窄范围处理。设置 `ARCHIVE_ANALYSIS_ENABLED=false` 并重启主线即可停用归档查询。
-
-## 5. 兼容的旧版推流
-
-管理员可从项目 R4 卡片的「高级操作」打开运维控制台。控制台保留 PowerShell/Bash 命令和既有 `inspect`、`query`、`push`、`--dry-run`、`--resume` 路径。先执行 dry-run，再根据需要用单独的受限机器密钥进行小批推流。`ingest` 收据中的 `batchId` 可在批次型项目的「数据批次」按既有权限显式关联。无需将这批内容再关联为离线归档引用。
+旧推流使用独立授权。通过运维入口选择 `inspect`、`query`、`push`，先 dry-run，再使用限定该来源的 `ingest` Machine Key。推流批次和离线归档引用可依各自生命周期管理。

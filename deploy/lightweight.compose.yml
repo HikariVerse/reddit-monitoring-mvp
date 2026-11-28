@@ -1,0 +1,8 @@
+# Apply with -f docker-compose.yml -f deploy/lightweight.compose.yml.
+services:
+  db:
+    mem_limit: ${DB_MEMORY_LIMIT:-1350m}
+  app:
+    mem_limit: ${APP_MEMORY_LIMIT:-1536m}
+  proxy:
+    mem_limit: ${PROXY_MEMORY_LIMIT:-128m}

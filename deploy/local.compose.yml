@@ -1,0 +1,83 @@
+# Apply with -f docker-compose.yml -f deploy/local.compose.yml.
+services:
+  db:
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${LOCAL_PG_SHARED_BUFFERS:-1GB}
+      - -c
+      - work_mem=${LOCAL_PG_WORK_MEM:-16MB}
+      - -c
+      - effective_cache_size=${LOCAL_PG_EFFECTIVE_CACHE_SIZE:-4GB}
+    ports:
+      - "127.0.0.1:${LOCAL_POSTGRES_PORT:-55440}:5432"
+
+  app:
+    environment:
+      ARCHIVE_ANALYSIS_ENABLED: "true"
+      ARCHIVE_ANALYSIS_BASE_URL: http://archive:8765
+      ARCHIVE_ANALYSIS_SOURCE_ID: ${ARCHIVE_ANALYSIS_SOURCE_ID:-}
+      ARCHIVE_ANALYSIS_SERVICE_TOKEN: ${ARCHIVE_SERVICE_TOKEN:?required}
+      ARCHIVE_ANALYSIS_TIMEOUT_MS: ${ARCHIVE_ANALYSIS_TIMEOUT_MS:-65000}
+      REPORT_LLM_BASE_URL: ${REPORT_LLM_BASE_URL:-}
+      REPORT_LLM_API_KEY: ${REPORT_LLM_API_KEY:-}
+      REPORT_LLM_MODEL: ${REPORT_LLM_MODEL:-deepseek-flash}
+    depends_on:
+      archive:
+        condition: service_healthy
+
+  archive:
+    image: ${LOCAL_ARCHIVE_IMAGE:-siftline-local-archive:cpu}
+    build:
+      context: ./plugins/zst-archive
+      args:
+        INSTALL_ANALYTICS: "true"
+        INSTALL_BALANCED: "true"
+    init: true
+    restart: unless-stopped
+    environment:
+      ARCHIVE_ROOT: /archive
+      ARCHIVE_SERVICE_TOKEN: ${ARCHIVE_SERVICE_TOKEN:?required}
+      EXPLORE_POTION_MODEL_DIR: /models/potion-int8
+      ANALYTICS_V2_MODEL_DIR: /models/v2-onnx
+      ANALYTICS_ACCEL_MODE: "off"
+      BI_CPU_CORES: ${BI_CPU_CORES:-auto}
+      BI_MAX_CONCURRENT_JOBS: ${BI_MAX_CONCURRENT_JOBS:-auto}
+      ARCHIVE_DUCKDB_THREADS: ${ARCHIVE_DUCKDB_THREADS:-4}
+      ARCHIVE_DUCKDB_MEMORY_LIMIT: ${ARCHIVE_DUCKDB_MEMORY_LIMIT:-8GB}
+      ARCHIVE_DUCKDB_TEMP_LIMIT: ${ARCHIVE_DUCKDB_TEMP_LIMIT:-4GB}
+      ARCHIVE_MAX_CONCURRENT_QUERIES: ${ARCHIVE_MAX_CONCURRENT_QUERIES:-3}
+      ARCHIVE_QUERY_TIMEOUT_SECONDS: ${ARCHIVE_QUERY_TIMEOUT_SECONDS:-60}
+    volumes:
+      - type: bind
+        source: ${ARCHIVE_ROOT_HOST:?required}
+        target: /archive
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${POTION_MODEL_HOST:-./output/首批分析能力集成交接/models/potion-int8}
+        target: /models/potion-int8
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ANALYTICS_MODEL_HOST:-./output/models/v2-onnx}
+        target: /models/v2-onnx
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import os, urllib.request;
+          request = urllib.request.Request('http://127.0.0.1:8765/health',
+          headers={'Authorization': 'Bearer ' + os.environ['ARCHIVE_SERVICE_TOKEN']});
+          urllib.request.urlopen(request, timeout=5).close()
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 30s

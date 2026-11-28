@@ -1,92 +1,33 @@
-# 数据模型、接口规则与路由契约
+# 数据、接口与指标契约
 
-数据结构体与 Schema 的唯一编程真源位于 [packages/contracts/src/](../packages/contracts/src/)（按域拆分为 `common`、`access`、`content`、`collection`、`feed`、`intelligence`、`projects`、`content-stories`、`product-docs`、`ai-catalog`、`web-boards` 及兼容导出 `source-content`），运行时自动编译至 **`GET /v1/openapi.json`**，并由 `npm run check:openapi` 强制校验。
+共享请求和数据结构见 [TypeBox 契约](../packages/contracts/src/)，运行时路由和鉴权见已认证的 `GET /v1/openapi.json`（网页代理为 `/api/v1/openapi.json`）。以 `npm run check:openapi` 校验实际注册和鉴权声明。本文维护跨域语义和业务口径。
 
----
+## 权限和在线数据
 
-## 1. 核心领域契约语义
+- `owner`、`admin` 和 `viewer` 使用浏览器会话。敏感运维受管理员 MFA 保护。Machine Key 受实际 scope 和来源限制，特权与浏览器会话专属入口禁止调用。对象、来源与批次范围在服务端求交集。
+- 采集来源的身份由平台、渠道、内容类型和目标决定。`deliveryMode` 创建后不可改。 `usageDomain` 决定运维工作区，`feedLane` 控制推荐分发，旧客户端省略字段保留原值。
+- 内容按来源、类型、外部 ID 标识。内容版本通过观测时间、抓取时间及稳定证据键决胜，已删除内容禁止旧版复活。观测用内容、来源、渠道、证据键去重。同键同内容幂等，同键异内容返回 `409`。 `publishedAt`、`sourceObservedAt`、`fetchedAt` 各自独立。
+- `collection_batch` 和成员由采集域维护，项目关联由项目域维护。受限用户只读可见的共享或本人批次。内容页、研究和流式导出使用相同的权限范围；导出要求实际导出授权，CSV 防公式注入。检索游标绑定范围，变更范围后重取。
+- 采集预检返回字段权限、存量覆盖及预算估计，提交和派发分别重验。 `collect` 使用 `Idempotency-Key`；状态未知的付费执行留待对账，保留原任务身份。
 
-| 领域概念 | 核心标识与不可变约束 |
-| :--- | :--- |
-| **`Platform` / `Provider`** | 平台 `reddit` \| `x` \| `bluesky` \| `web`；渠道 `feed` \| `newsnow` \| `kaix` \| `red_crawler` \| `twitterapis` \| `scrapebadger` \| `bluesky_appview` \| `external_ingest`。 |
-| **`CollectionSource`** | 唯一键 `(platform_id, primary_provider, content_kind, target)`；创建后 `deliveryMode`（`pull` \| `push`）不可变；V2 新增 `feed_lane`（`discussion` \| `release` \| `monitor_only` \| `news`）与 `quality_grade`。`usageDomain`（`research` / `feed`）区分采集管理工作区，`feedLane` 控制推荐分发，两者独立，旧客户端省略 V2 字段的 PATCH 保留原值。 |
-| **`Content`** | 业务身份 `(source_id, kind, external_id)`（外部 ID 统一字符串，X 主帖与回复同属 `post`）。版本决胜三元组 `(content_observed_at IS NOT NULL, COALESCE(content_observed_at, content_version_fetched_at), content_evidence_key COLLATE "C")`；同键同版本内容冲突抛 `409`；`deleted`/`removed` 清空正文且禁止落后版本复活。对外 `textState`（`full` \| `summary` \| `missing`）由正文与 `platform_details.textCompleteness` 派生。 |
-| **`Observation`** | 时序快照按 `(content_id, collection_source_id, provider, evidence_key)` 唯一存储；同 `payload_hash` 重放静默忽略（`updated=0`），同键异值返 `409`；`newsnow` 仅在携带 `web.rank` 或其他指标时使用 UTC 1 小时快照桶生成 `evidenceKey`。 |
-| **批次与项目** | `collection_batch` / `collection_batch_item` 属于采集域，`monitor_project_batch` 属于项目域。批次型项目只读启用且授权的批次，Viewer 仅可见共享或本人批次，内容查询在同一 discovery 上求批次来源与来源过滤的交集。 |
-| **三轴时间** | `publishedAt`、`sourceObservedAt`、`fetchedAt` 彻底分离，未知原始时间保持 `null`。 |
+## 主要业务接口
 
----
+| 能力 | 入口与行为 |
+|---|---|
+| 信息流、资讯和监测 | `/v1/content/stories`、`/v1/feed/*` 与 `/v1/intelligence/*`。 `channelScope=info\|social\|all` 在支持端点与平台取交集。监测按对象和来源授权，使用预估、预算与取证窗口，趋势取真实观测或有效分桶。 |
+| 研究发现 | `POST /v1/research/resources/discover` 读取符合权限的在线资料、批次、项目与归档候选。归档快速估计和精确复核分别解释；读取发现不启动付费请求。 |
+| 项目归档 | `/v1/projects/:id/archives` 及预览、状态、查询、证据端点。引用绑定归档 ID、版本和规范化范围，同范围幂等。查询只在引用与附加条件的交集取样。版本变化可返回 `409 archive_version_changed`； HMAC 游标绑定版本和过滤范围。未知全量时 `totalMatches=null`；证据以月份、帖子及评论标识定位。 |
+| Explore | `/v1/explore/capabilities`、`/analyze`、`/progress/:runId`、`/evidence` 和 `/studies/:studyId`（同一前缀）。返回本次实际使用的来源、档位、窗口或快照；证据与研究快照按拥有者及来源访问。 |
+| 报告流程 | `/v1/reports/drafts`、`/runs` 和运行 `/action` 组织异步任务，根据场景选择目标、范围、章节和确认采集。阶段结果区分就绪、纯数据、失败或待处理，显示实际报告模式 `llm_verified`、`partial_llm` 或 `pure_data`。 |
+| 报告、导出与计划 | `/v1/reports/:id` 读可见报告，`/export` 在同一读取判定外额外检查浏览器导出权限。 `/v1/reports/schedules` 管理计划，手动触发和定时窗口分别生成运行；周期按计划和时间窗维护幂等。 |
 
-## 2. 认证、会话、MFA 与 Scope 权限边界
+报告、发现和 Explore 使用浏览器会话。报告数据章和证据由分析结果提供，LLM 使用已有范围、指标和证据 ID。保存的 Explore 研究可作为报告资料，底层仍按服务端授权访问。离线 HTML 可展示已经授权导出的快照内容。
 
-| 维度 | 契约规则 |
-| :--- | :--- |
-| **主体层级** | `owner` / `admin` 浏览器管理员、`viewer` 浏览器受限用户、`machine` API Key（支持绑定非空或受限 `allowedSourceIds`）。 |
-| **Machine Key Scopes** | `read`、`sources:write`、`projects:write`、`collect`、`ingest`、`export`。**`/v1/content/*` 仅 `GET/HEAD` 允许映射 `read` scope**；Machine Key 永不可调用 `/v1/auth/*`、`/v1/access/*`、`/v1/admin/*`、`/v1/workspace/*`、`/v1/quotas*`、`/v1/sources/credentials*`、`/v1/feed/events` 与 `/v1/feed/preferences*`。 |
-| **浏览器会话与安全** | 登录/注册限同源 JSON（`<= 8 KiB`）且 `/v1/auth/*` 拒绝 Bearer；标准会话 24h（`remember=true` 时 Viewer 最长 30 天），空闲超时 Admin 30 分钟 / Viewer 2 小时（记住登录 7 天）；支持列出会话（最多 100 条）、吊销单个会话及退出全部浏览器（保留 Machine Key）。 |
-| **邮件挑战与管理员 MFA** | 邮件注册/重置/验证 Token 15 分钟单次有效且绑定 Turnstile；启用 MFA 的账户登录返回 `202` 预认证挑战，需经 `POST /v1/auth/mfa/complete`（TOTP 或 8 组一次性恢复码之一）才签发会话；管理员写敏感配置需 5 分钟内 TOTP `step-up`。 |
+## 指标、证据与降级
 
----
+Python 工作者的[指标注册表](../plugins/zst-archive/analytics_core/analysis_core/catalog.py)定义指标 ID、单位、分组和面板，方法见[商业计算](../plugins/zst-archive/analytics_core/analysis_core/commercial.py)。在线 TS 的[回退分析](../src/modules/archive-analysis/explore-fallback.ts)覆盖基础面板。场景、过滤和支持状态以实际来源与响应为准。
 
-## 3. 采集幂等、检索游标与流式导出
-
-1. **采集与付费熔断**：`POST /v1/sources/:id/collect` 强校验 `Idempotency-Key`（同源同键同体复用 `job`，异体返 `409`）；`POST /v1/sources/:id/ingest` 接收 `1..100` 条且解压体 `<= 1 MiB`（首次 `201`、重放同载体 `200`、异体 `409`）。仅当首次付费请求明确失败/429 且无已计费 Run 时允许单跳切备（`twitterapis -> scrapebadger`、`kaix -> red_crawler`）；`unknown` 状态立即阻断来源，须显式 `acknowledgePotentialCharge: true` 解封。
-2. **检索、分面与讨论树**：`compileContentFilter` 统一在权限交集内编译三段词、双字词 GIN、`sourceGroup`/`tier`/`language`/`hasMedia`/`signal` 与 `[from, to)`；列表使用 Keyset 游标（范围或项目 `revision` 变化返 `409 cursor_scope_changed`）；`/v1/content/facets` 强校验正区间 `<= 90` 天；`/v1/content/:id/thread?view=top|matches|op` 递归上限 32 跳、返回上限 200 节点，断链标 `contextMissing = true`。
-3. **研究采集预检**：`POST /v1/research/collection-plans/preview` 返回 `restrictions`、字段权限、可见存量与预算估算。提交与执行分别重验项目权限、套餐、配额及供应商预算。`GET /v1/batches?forProjectId=` 仅返回有项目写权限、授权、非空且尚未关联的研究批次。个人覆盖可指定每帖评论上限、项目数、回溯天数、渠道选择和导出权限，省略这些字段则继承套餐。
-4. **流式导出**：`GET /v1/content/export?format=csv|json` 默认 1 万、上限 5 万行，`REPEATABLE READ READ ONLY` + 全局单槽锁（冲突 `429 + Retry-After: 5`）。JSON 结尾输出 `{ complete: true }`，CSV 中和 `=+-@` 公式注入。普通浏览器账号须满足实际生效的 `exportEnabled`，否则返回 `403`。项目证据样本 CSV 在浏览器下载前重新读取同一策略。管理员和有 `export` scope 的 Machine Key 继续按角色、scope 和来源范围授权。
-
----
-
-## 4. V2 产品 BFF 接口契约（已注册 OpenAPI · 详见 [蓝图](plans/backend-v2-blueprint.md)）
-
-### 4.1 信息流与热榜（`/v1/feed/*` · 5 路径 / 6 操作）
-
-**内容分域（PR #54 候选契约）**：`GET /v1/content/stories`、`GET /v1/content/stories/insights`、`GET /v1/feed/stream` 和 `GET /v1/feed/hot` 均接受 `channelScope=info|social|all`。`info` 仅含 `web`，`social` 仅含 `reddit`、`x`、`bluesky`；省略参数或传 `all` 均保留原有跨域混排规则。`platform` 与 `channelScope` 取交集，不匹配时不返回该平台内容。
-
-故事及洞察接口在 `social` 域默认不排除 `social-trends` 来源组，显式传入 `includeTrends=false` 时排除；`info` 与 `all` 保留原有故事过滤规则。V2 推荐流与热榜不接受 `includeTrends`，社媒趋势条目按现有候选规则（含分发 lane 与可见性）参与筛选。
-
-- **`GET /v1/feed/stream`（`public_read` + `read`）**：Query 支持 `mode=foryou|hot|following|explore`、`topic`、`platform`、`language`、`includeNews`、`limit`（`1..40`）、`excludeIds`、`seed`。直出标准化 `FeedCard`（含 `cardLayout`、`headline`、`clean_excerpt`/`tldr`、`media`、`discussion`、`author`、`source`、`topCommentsPreview`、`intentTag`、`reason`、`viewerState`），匿名用户自动切入非个性化高价值混排。
-- **`GET /v1/feed/hot`（`public_read` + `read`）**：跨平台 `unifiedHeat`（0..100 百分位归一化）排行榜，支持 `window=6h|24h|48h|7d`、`platform`、`topic`、`limit`（`1..60`）、`offset`。`sparkline` 取过去 48 小时每 6 小时段内最新的真实互动快照，以时间升序返回互动分，允许空数组或单点。`corroborationCount` 为当前候选集内同一故事聚簇的独立信源数。
-- **`POST /v1/feed/events`（`authenticated` 浏览器）**：批量上报最多 50 条曝光与行为事件（`impression|dwell|open|bookmark|useful|dismiss|mute_*`），事务更新已读防重与 14 天半衰期兴趣权重（`[-2.0, +2.0]` 钳位）。同一用户对同一内容的 `bookmark` 和 `useful` 各生效一次，`accepted` 返回实际新入库的事件数。
-- **`GET` / `PATCH /v1/feed/preferences` & `POST /v1/feed/preferences/reset`（`authenticated` 浏览器）**：管理破茧探索滑块（`exploreRatio: 0..0.5`）、关注主题与屏蔽列表及一键重置。
-
-### 4.2 Semrush 级社媒与 GEO 智能监测（`/v1/intelligence/*` · 10 路径 / 13 操作）
-
-- **监测生命周期**：`GET/POST /v1/intelligence/monitors`、`GET/PATCH/DELETE /v1/intelligence/monitors/:id`（`revision` 乐观锁），统一支撑 `keyword`、`author_list`（15–20 个 X 账号自动拼批）与 `community_bundle`，单日单项上限 `20,000`。
-- **监测器归属**：普通浏览器账号只可访问本人监测器。管理员和所有者的浏览器会话可跨账号管理。Machine Key 仅可访问所属账号的监测器，关联来源必须全部在 Key 范围内，并继续受相应接口的 scope 约束。监测器明细、写入和按监测器统计统一执行相同的访问规则。
-- **托管建源准入**：监测器新建、目标与周期配置、重新启用当前仅开放给管理员浏览器会话。普通用户可停用、删除和手动采集本人已启用的已有监测器，手动采集沿用套餐准入；已停用监测器禁止新建 `/collect` 任务（返回 `409`），同 `revision` 的历史幂等重放仍保持只读可查。监测器不得重新激活已停用来源。
-- **托管调度生命周期**：监测器新建来源时记录托管归属。多个已启用监测器共用一个托管来源时采用最短周期，沿用来源调度的 12 小时周期上限。没有启用引用时，停止定时并取消尚未发起渠道请求的排队任务，保留来源和历史数据。既有或管理员自建来源的调度保持独立。升级已经应用 `063` 的环境时，运维须核对历史监测来源及无人引用的启用调度。
-- **预算门控采集**：`POST /v1/intelligence/monitors/:id/estimate`（Pre-flight 预估请求数与条目预算，计入该监测器当 UTC 日已预留总量 `intel_monitor_usage`）与 `POST /v1/intelligence/monitors/:id/collect`（强制 `Idempotency-Key`，扣减个人及监测器日预算并与定时调度/自动水合共享累计日上限）。已启用的 `community_bundle` 在社区拉取成功后，以近 7 日已观测主帖评论量计算 P80。每次最多入队一条超过阈值的主帖，补采最多 15 条 Top 评论，受监测器 UTC 日预算、账户配额、系统日上限与供应商预算约束。
-- **Kaix 手动采集**：全局关键词的主帖上限 >250 时，先按默认 `new/all` 取样，再按命中密度补采至多 5 个社区（每次至多 250 条）；未指定排序或时间桶的 >31 天窗口仅在社区补采使用 `top/year`，不替换种子。关键词与社区任务开启评论时只补采入窗且通过阈值、评论数最高的至多 50 帖，每批 25 帖。主帖上限不截断评论阶段，整项任务仍是同一批次、部分覆盖。预估含所有阶段可能返回的行（包括被过滤的结果及补采时重读的根帖），系统还为每次 Actor Run 预留 1 单位；Worker 按实际阶段的上界逐次扣减。
-- **社媒全站日上限**：Kaix、RedCrawler、TwitterAPIs 和 ScrapeBadger 的新渠道请求共同计入每日 20,000 资源预留单位。Worker 派发前原子检查全站上限和渠道预算。全站额度不足时，普通任务等下一 UTC 日，自动评论补采按当天的预留条件取消。
-- **单请求仪表盘与下钻**：`GET /v1/intelligence/monitors/:id/overview`（`days <= 90`、`bucket=6h|1d` 返回趋势、SoV、意图占比、GEO 高频外链域名榜（含获正向评分的评论，每个域名在同一条评论中计一次）、高频词与诚实样本覆盖声明）、`.../posts`（多维排序下钻）、`GET /v1/intelligence/authors` / `.../authors/:platform/:handle`（KOL 聚合与单人画像，可选 `monitorId` 校验并限定至授权监测器范围，个人互动率基于可见历史样本，计入点赞或分数、评论、转发、收藏）、`GET /v1/intelligence/communities` / `.../communities/:subreddit`（多板块象限对比与单板块 7×24 热力图/Flair/精华流，可选 `monitorId` 限定范围）；全量内容、Feed、标注与监测分析出口均在 `allowedSourceIds` 之外同步执行私有批次可见性隔离。
-
----
-
-## 5. 已注册全量 HTTP 路由清册（`check:openapi` 实测：`159` 路径 / `184` 操作）
-
-### R4 项目归档
-
-所有请求使用浏览器会话。访问状态、引用、检索和证据前校验项目读取权限；检索、预览和关联还要求配置的活跃 R4 来源授权。普通用户需显式授权该来源。预览、确认、解除关联需要项目编辑权限。
-
-- `GET /v1/projects/:id/archives/status` 返回连接状态、归档版本、月份、UTC 覆盖范围和 manifest 数量。只有目录实际可读时显示已连接。
-- `GET /v1/projects/:id/archives` 列出项目的获授权引用。`POST` 使用 `{ archiveId, version, scope }`，以规范化范围幂等确认，`POST .../preview` 使用同样的输入。`DELETE .../:refId` 解除当前项目引用。
-- `POST .../:refId/search` 接受 `{ filters, cursor? }`，追加的关键词、Subreddit、UTC 时间范围只取与原范围的交集。全量匹配数未知时，`totalMatches` 为 `null`，同时返回本页样本量和是否还有结果。超过召回上限返回可收窄的明确错误。
-- `POST .../:refId/evidence` 接受 `{ filters, month, docId, commentId? }`。先确认帖子仍在范围内，再返回归档原文、真实已归档评论数和至多 15 条精选评论。原帖报告评论数独立于归档评论数。证据由引用所绑定的版本、月份、帖子键及可选评论键定位。
-- 版本变动返回 `409 archive_version_changed`。游标用 HMAC 绑定版本、引用和筛选条件。端点不会返回服务凭证或服务器目录。
-
-
-| 资源域（路径 / 操作） | 已注册路由端点 |
-| :--- | :--- |
-| **System (4 / 4)** | `GET /healthz`、`GET /readyz`、`GET /v1/capabilities`、`GET /v1/openapi.json` |
-| **Access (24 / 26)** | `GET /v1/auth/session`、`POST /v1/auth/{login,register,logout,logout-all}`、`GET /v1/auth/sessions`、`DELETE /v1/auth/sessions/:id`、`POST /v1/auth/password/change`、`POST /v1/auth/email/{register,reset,verify}/{start,finish}`、`POST /v1/auth/mfa/{complete,recovery-codes,step-up}`、`GET/POST /v1/access/keys`、`DELETE /v1/access/keys/:id`、`GET/POST /v1/access/invites`、`DELETE /v1/access/invites/:id`、`GET /v1/access/users`、`PATCH /v1/access/users/:id`、`GET /v1/access/audit` |
-| **Collection & Quotas (31 / 35)** | `GET /v1/public/sources`、`GET/POST /v1/sources`、`POST /v1/sources/batch-update`、`PATCH/DELETE /v1/sources/:id`、`POST /v1/sources/{preview,import}`、`POST /v1/sources/:id/{collect,ingest,refresh,unblock}`、`GET /v1/sources/:id/jobs`、`GET /v1/sources/budgets`、`GET/PUT /v1/sources/budgets/global`、`PUT /v1/sources/budgets/:provider`、`GET /v1/sources/credentials`、`PUT/DELETE /v1/sources/credentials/:provider`、`POST /v1/sources/credentials/:provider/test`、`GET /v1/source-jobs`、`GET /v1/source-jobs/recent`、`GET /v1/source-jobs/:id`、`POST /v1/source-jobs/:id/{cancel,retry,continue}`、`GET /v1/quotas/summary`、`PUT /v1/quotas/plans/:tier`、`PUT /v1/quotas/users/:id`、`GET /v1/batches`、`DELETE /v1/batches/:id`、`PATCH /v1/batches/:id/visibility`、`POST /v1/research/collection-plans/{preview,collect}` |
-| **Content (9 / 9)** | `GET /v1/content`、`GET /v1/content/{feed,facets,stories,stories/insights,export}`、`GET /v1/projects/:id/content`、`GET /v1/content/:id`、`GET /v1/content/:id/thread` |
-| **Feed [V2] (7 / 8)** | `GET /v1/feed/{stream,hot}`、`POST /v1/feed/events`、`GET/PATCH /v1/feed/preferences`、`POST /v1/feed/preferences/reset`、`GET /v1/feed/admin/summary`、`POST /v1/feed/admin/prune` |
-| **Intelligence [V2] (20 / 25)** | `GET/POST /v1/intelligence/monitors`、`GET/PATCH/DELETE /v1/intelligence/monitors/:id`、`POST /v1/intelligence/monitors/:id/{estimate,collect}`、`GET /v1/intelligence/monitors/:id/{overview,posts}`、`GET /v1/intelligence/authors`、`GET /v1/intelligence/authors/:platform/:handle`、`GET /v1/intelligence/communities`、`GET /v1/intelligence/communities/:subreddit`、`GET /v1/intelligence/admin/legacy-sources`、`POST /v1/intelligence/admin/legacy-sources/:id/reconcile`、`GET /v1/intelligence/admin/ops-summary`、`POST /v1/intelligence/admin/monitors/:id/reconcile`、`POST /v1/projects/:id/research/l2`、`GET/POST /v1/projects/:id/research/tasks`、`GET/DELETE /v1/projects/:id/research/tasks/:taskId`、`POST /v1/projects/:id/research/tasks/:taskId/{cancel,retry}`、`GET /v1/projects/:id/research/tasks/:taskId/evidence` |
-| **Projects (11 / 15)** | `GET/POST /v1/projects`、`GET/PATCH/DELETE /v1/projects/:id`、`POST /v1/projects/:id/{publish,fork}`、`GET /v1/projects/:id/overview`、`POST /v1/projects/:id/hydrate`、`GET/POST /v1/projects/:id/batches`、`PATCH /v1/projects/:id/batches/:batchId`、`POST /v1/projects/:id/batches/:batchId/move`、`GET /v1/projects/:id/research/scope`、`POST /v1/projects/:id/research/l1` |
-| **Docs (4 / 6)** | `GET/POST /v1/docs`、`GET /v1/docs/:slug`、`GET /v1/docs/:slug/file`、`PATCH/DELETE /v1/docs/:id` |
-| **Archive Analysis (10 / 11)** | `GET /v1/projects/:id/archives/status`、`GET/POST /v1/projects/:id/archives`、`POST /v1/projects/:id/archives/preview`、`DELETE /v1/projects/:id/archives/:refId`、`POST /v1/projects/:id/archives/:refId/{search,evidence}`、`GET /v1/explore/capabilities`、`GET /v1/explore/progress/:runId`、`POST /v1/explore/{analyze,evidence}` |
-| **Workspace (4 / 6)** | `GET/POST /v1/workspace/queries`、`DELETE /v1/workspace/queries/:id`、`GET /v1/workspace/annotations`、`GET/PUT /v1/workspace/annotations/:id` |
-| **AI Catalog Public (8 / 8)** | `GET /v1/ai/{vendors,models,events,updates,rankings}`、`GET /v1/ai/{models,events,rankings}/:id` |
-| **AI Admin (27 / 32)** | `GET /v1/admin/ai/{queue,sources,sync-runs,history/status,rankings}`、`GET /v1/admin/ai/ops/{summary,audit}`、`PATCH /v1/admin/ai/candidates/:id`、`POST /v1/admin/ai/candidates/bulk-dismiss`、`POST /v1/admin/ai/candidates/:id/{publish,reject}`、`GET/POST /v1/admin/ai/events`、`PATCH/DELETE /v1/admin/ai/events/:id`、`POST /v1/admin/ai/events/:id/{unpublish,rollback}`、`POST /v1/admin/ai/{models,aliases,discovery/run}`、`PATCH /v1/admin/ai/sources/:code`、`POST /v1/admin/ai/sources/:code/sync`、`GET /v1/admin/ai/credentials`、`PUT/DELETE /v1/admin/ai/credentials/:provider`、`POST /v1/admin/ai/credentials/:provider/test`、`PATCH /v1/admin/ai/vendors/:id/autopublish`、`POST /v1/admin/ai/alerts/:id/resolve`、`GET/PUT /v1/admin/ai/vendor-sources`、`DELETE /v1/admin/ai/vendor-sources/:sourceId/:vendorId` |
+- 样本规模、统计分母、日期、来源、去重层级和分析模型一并解释结果。可用性状态包括 `ready`、`exploratory`、`insufficient_data`、`unsupported_source` 等。无可用日期、分母或观测时显示缺测和实际覆盖。
+- MI06 样本品牌份额以符合条件的品牌提及计数为分母。MI07 衡量品牌提及文档占样本的覆盖。MI03 需要归档总体台账以计算每百万关注度，PG 普通样本缺少该总体时返回不支持。
+- MI14 标识有比较语境的竞品关系，MI13 统计共提及。MI19 按分句和相应目标归属品牌、属性及情感，品牌或分母不足时保留可追溯样本与适用性。
+- 报告快照保存分析口径与证据引用。展示或导出保留原数据窗口、范围与覆盖，不将样本提及份额当作市场占有率。原始样本和已实测范围见[状态页](status.md)。

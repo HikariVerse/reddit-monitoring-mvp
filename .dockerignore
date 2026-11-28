@@ -5,5 +5,9 @@ dist
 apps/web/dist
 output
 plugins
+.codex
+.workbuddy
+.tmp*
 .env*
+**/.env*
 **/*.env

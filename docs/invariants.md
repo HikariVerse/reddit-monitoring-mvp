@@ -1,16 +1,18 @@
-# 核心工程与业务不变量台账（Invariants）
+# 长期工程与业务保护
 
-本文件记录系统**任何 PR 与 Agent 修改均不可破坏**的核心不变量，以及对应的自动化验证入口。修改行为前必须核对，新增故障修复应将根因沉淀为新的不变量与回归测试。
+这里只记录保护权限、数据、费用、兼容性和回归完整性的长期规则。修改规则或实现时使用针对性证据。
 
-| 编号 | 不变量（Invariant） | 强制门禁 / 验证入口 |
-| :--- | :--- | :--- |
-| **INV-001** | **默认拒绝、全路由声明式鉴权与对象级隔离**：所有注册路由必须在路由定义中显式声明 `config.auth`（启动期 `onRoute` 与请求期 `preParsing` 双重 Fail-Closed）；未认证请求禁止访问私有接口；Machine Key 永不可调用 `/v1/auth/*`、`/v1/access/*`、`/v1/admin/*`、`/v1/workspace/*`、`/v1/quotas*`、`/v1/sources/credentials*`；`/v1/content*` 仅允许 `GET/HEAD` 映射 `read` scope 且禁止暴露 `DELETE`；带 `allowedSourceIds` 的账号/Key 只能读取和检索范围交集内的数据。 | `apps/api/src/route-policy.ts`、`npm run check:openapi`、`tests/unit/route-auth-invariants.test.ts`、`tests/unit/platform-security.test.ts`、`tests/integration/platform-security-postgres.test.ts` |
-| **INV-002** | **唯一内容写入口与摄入幂等**：全库所有内容节点写入必须经由 `commitContentBatch`（`src/modules/content/index.ts`）；乱序到达与重复摄入不得产生重复节点或覆盖更新的观测证据。 | `tests/unit/content-batch.test.ts`、`scripts/check-table-ownership.ts` |
-| **INV-003** | **付费渠道 `unknown` 永不自动重放与租约隔离**：付费采集器进入 `unknown` 或无 `runId` 的 `starting` 状态时绝不自动重放请求；Worker 失去租约（`lease_token` 不匹配）后 `saveState` 必报 `409`。 | `tests/unit/kaix-content.connector.test.ts`（容量拒绝码与其他 402 的区分、Relay 透传边界）；`tests/integration/collection-postgres.test.ts` 的 PG16「Apify slot accounting, authorized capacity retries, and read-only recovery」覆盖共享并发槽位、明确未启动的容量 402 有界退避、普通或不透明 402 与网关失败不得重放，以及保留付费 Run ID 的只读恢复。 |
-| **INV-004** | **配额与预算并发扣减不超发**：Viewer 配额预扣（`admitViewerCollection`）与 Provider 预算校验必须在数据库行锁事务内原子完成，并发请求不得透支日/月限额。 | `src/modules/collection/policy.ts`、`tests/integration/credentials-access-postgres.test.ts` |
-| **INV-005** | **迁移前向不可变与 DDL 回滚安全**：已合入 `main` 的 SQL 迁移永不改写/删除；新迁移顺延编号且单文件失败必须完整回滚 DDL 与 `schema_migration` 台账；`050` 退役表永不复活。 | `npm run lint:policy`、`Squawk` (`sql-lint`)、`tests/integration/migration-assets-postgres.test.ts` |
-| **INV-006** | **前端构建产物零后端密钥泄漏**：前端构建产物中严禁出现 `VITE_*` 敏感密钥、Apify Token、私钥或数据库连接串；图表（含 ECharts）可自由按场景加载渲染。 | `npm run check:web-bundle`、`tests/unit/repository-policy.test.ts` |
-| **INV-007** | **零循环依赖、公开门面与基础层隔离**：全仓零循环依赖；`access`/`content` 为严格叶子域、`contracts`/`shared`/`platform`/`connectors` 保持纯净、前端禁引后端源码；跨模块调用须经 `index.ts` 公开门面且禁引他域 `routes.ts`；业务模块之间在无循环依赖前提下可按需协作。 | `.dependency-cruiser.cjs`（`npm run lint:arch`） |
-| **INV-008** | **数据库表唯一写归属与敏感凭证表读隔离**：全库业务表执行单模块写归属（每表唯一写主模块）；`app_user_password`、`app_session`、`app_auth_challenge`、`app_auth_mfa`、`app_auth_mfa_login` 与 `source_provider_credential` 仅限所属域读取；普通业务数据表允许跨模块 SQL `SELECT/JOIN`。 | `scripts/check-table-ownership.ts`（`npm run lint:arch`） |
-| **INV-009** | **主线 4 GB 轻量运行时边界**：主线服务端零 ORM（Prisma/TypeORM/Drizzle）、零 Redis/BullMQ、零无头浏览器/Python/DuckDB；重型与反爬采集通过外置 Sidecar + 受限 Machine Key 推流。R4 只读查询经主线项目与来源授权后调用外置服务，使用独立服务凭证。 | `.dependency-cruiser.cjs`、`docker-dryrun` |
-| **INV-010** | **验证不可自降级**：禁止在 PR 中通过添加 `.only(` 屏蔽测试，修改 CI/ESLint/边界检查规则、`AGENTS.md`/`docs/invariants.md` 或新增 `.skip`/抑制注释须经 `Governance Guard` 高亮提示与 `CODEOWNERS` 审查。 | `scripts/check-governance-diff.mjs`、`.github/CODEOWNERS` |
+| 编号 | 保护 | 实现与验证 |
+|---|---|---|
+| INV-001 | 默认拒绝、全路由显式 `config.auth`。角色、浏览器会话、管理员 MFA、Machine Key scope、对象归属和 `allowedSourceIds` 交集由服务端校验。特权和浏览器区拒绝 Machine Key。`/v1/content/*` 支持 `read` scope 的方法限 GET/HEAD，导出使用独立授权。 | `route-policy.ts`、`check:openapi`、平台访问与私有批次回归 |
+| INV-002 | 唯一内容写入经 `commitContentBatch`。重放和乱序不能重复写入、覆盖更新证据或复活已删除内容。 | 内容批写单测、表所有权检查 |
+| INV-003 | 付费状态 `unknown` 或不带 Run ID 的不明启动不得自动重放。失去 Worker 租约后拒绝保存，恢复保留已知 Run ID。 | 采集连接器与 PG 并发/恢复夹具 |
+| INV-004 | Viewer 配额、渠道及系统预算按实际授权原子检查、预扣，保证并发不超发。 | 采集策略、隔离 PG 预算回归 |
+| INV-005 | 已合入的 SQL 迁移不可改动，新增前向追加。失败完整回滚 DDL 与台账。迁移 `050` 退役表保持退役。 | `lint:policy`、Squawk、隔离 PG 迁移 |
+| INV-006 | 密钥、连接串和私有环境文件不得进入 Git、前端产物或报告证据。 | 仓库与 Web 产物检查 |
+| INV-007 | 共享契约和基础层保持独立，应用与模块通过公共入口协作，保持依赖方向无环。浏览器不依赖服务器源码。 | Dependency Cruiser |
+| INV-008 | 每张业务表有单一写入域，凭证、密码、会话与 MFA 相关表限定所属域读取。普通业务读按需关联，应用数据仍按实际权限范围过滤。 | `scripts/check-table-ownership.ts` |
+| INV-009 | R4 归档/外置分析采用独立服务凭证与经授权的私网入口，挂载归档只读。外置推流使用限定来源的 `ingest` Machine Key。外部数据入口保留 SSRF、请求超时和负载防护。 | R4 HTTP/Parquet 夹具、应用归档授权、连接器测试 |
+| INV-010 | 保持有效回归保护。新增测试聚焦导致跳过其他用例时阻断，新增跳过/抑制及规则调整交由对应评审。 | `check-governance-diff.mjs`、CODEOWNERS 路径匹配 |
+
+度量和报告真实性见[产品说明](README.md)与[契约](contracts.md)，实际门禁和测试范围见[开发手册](development.md)。

@@ -1,38 +1,12 @@
-# Agent 开发与协作入口
+# SIFTLINE 开发入口
 
-开工前核实当前检出分支（主干统一为 `main`，生产工作目录 `/root/workspaces/reddit-monitoring-mvp`）与 `git status`，并参考[开发与运维手册](docs/development.md)的分支与验证规范。
+SIFTLINE 是**面向跨境电商的多源数据研究与智能报告平台**。当前开发和本机验收在 HikariVerse 的 `feat/r4-duckdb-explore`，Euroish 团队仓库的 `main` 是合并基线。开工先运行 `git status --short --branch` 和 `git rev-parse HEAD`，按任务核对分支和未提交工作。
 
-## 协作与遇阻直报原则
+React 工作台负责研究流程。Fastify/TypeBox 管接口与访问授权，PostgreSQL 保存在线业务和研究快照。独立 R4 服务用 DuckDB 读历史归档并运行 Python/ONNX 分析。先查[当前状态与近期任务](docs/status.md)，按需读[开发与验证](docs/development.md)、[架构](docs/architecture.md)、[契约与指标](docs/contracts.md)或 [R4 操作](docs/r4-archive.md)。
 
-- **遇阻直报（最重要）**：如发现某条工程约束与当前缺陷修复或简洁设计存在明显冲突，**严禁为了过门禁而写绕道代码、复制逻辑或拆无意义薄包装**；必须先向维护者直白说明冲突点与原因，再决定遵守还是调整约束。
-- **交付看质量与真实证据**：PR 为候选方案，按价值、质量、风险与真实依赖合入，不按编号/时间排队。交付前重读完整 diff，优先复用已有能力与清晰数据流，不伪造运行、性能、生产状态或审批，不削弱测试来制造绿灯。详见[门禁分级与评审原则](docs/development.md#11-门禁分级与评审原则)。
+- 本机完整配置以实际可见 CPU、内存、GPU 为依据。CPU 核心分析可独立运行，GPU 按健康探测可选增强，失败保留 CPU 回退与运行版本。按[开发手册](docs/development.md#本机完整开发与验收)启动，按变更影响选择验证。
+- 优先复用项目已有能力与成熟组件。技术取舍看业务效果、数据正确性、运行成本与维护性。工程约束和实际需求冲突时，直接说明冲突和证据。
+- 保持[长期工程保护](docs/invariants.md)。服务端校验权限、对象归属、来源和费用；唯一内容写入口为 `commitContentBatch`；已合入迁移前向追加，付费状态不明禁止自动重放，密钥不进 Git、前端或交付日志。
+- 交付前检查完整 diff，记录实际运行命令、结果、版本和覆盖范围，分别说明代码、接线、运行、端到端和部署状态。
 
-## 1. 两份动态状态真源
-
-1. **[docs/development.md](docs/development.md)**：单主干协作流程、CI 门禁分级、本地验证、多阶段 Docker 构建、安全加固与生产运维。
-2. **[docs/status.md](docs/status.md)**：生产环境最近实测基线、`origin/main` 主干与后续路线。
-
-## 2. 规范职责矩阵（唯一真源）
-
-| 文档 | 唯一管辖范围 |
-| :--- | :--- |
-| [产品边界与口径](docs/README.md) | 产品目标、不做清单、2026-11-23 定案与指标诚实性规则 |
-| [系统架构与边界](docs/architecture.md) | 4 GB 运行拓扑、模块架构、表所有权、检索、L1–L3/R4 隔离与 SSRF/资源边界 |
-| [核心不变量台账](docs/invariants.md) | `INV-001`..`INV-010` 强制门禁与自动化回归测试映射 |
-| [数据与 API 契约](docs/contracts.md) | 领域模型、认证/MFA/Scope、采集幂等、`feed`/`intelligence` 契约与全量路由清单 |
-| [前端 V2 交互规范](docs/design.md) | 现有 UI 基线与面向 `/v1/feed/*`、`/v1/intelligence/*` 的 Frontend V2 重构设计 |
-| [Backend V2 蓝图](docs/plans/backend-v2-blueprint.md) | 已批准的 Backend V2 产品与架构总设计 |
-
-## 3. 核心工程红线（MUST / MUST NOT）
-
-- **真实性红线**：`MUST NOT` 混淆“生产运行版本”、“`origin/main` 已合入代码”与“未合入 PR 分支代码”；`MUST NOT` 伪造趋势、火花线、百分比或把未实装接口写成 `[LIVE]`；用户明确指令高于历史文档。
-- **单主干与安全操作**：唯一常驻主干为 **`main`**，从最新 `origin/main` 切分支开发，通过 `CI Gate` 与评审后 `Squash and Merge`；发版使用 `vX.Y.Z` 不可变 Tag；禁输出密钥、禁无授权 `git push --force`。
-- **前向迁移不可变**：主干已合入的 SQL 迁移严禁改写、移动或删除；新迁移按当前主干最大编号顺延，由 `lint:policy`、`Squawk`、PG16 回滚测试与 `.github/CODEOWNERS` 把关；`050` 退役旧表永不复活。
-- **主线与外挂隔离**：主线只运行 `Fastify 5 + TypeBox + PostgreSQL 16 + React`（零 ORM、Redis、Python、DuckDB、无头浏览器）；R4 `plugins/zst-archive/` 与重型/反爬 L3 采集器 `MUST` 外置运行，推流只持锁死 `allowedSourceIds` 与 `ingest` scope 的 Machine Key 调 `POST /v1/sources/:id/ingest`。R4 归档直查由主线鉴权后访问外置 DuckDB 的私网只读接口，使用独立服务凭证。
-- **安全与数据底线**：严格遵守[核心不变量台账](docs/invariants.md)（`INV-001`..`INV-010`）；全库内容写唯一入口为 `commitContentBatch`；`/v1/content/*` 仅 `GET/HEAD` 映射 `read` scope；付费渠道 `unknown` 永不自动重放。
-
-## 4. 代码质量准则
-
-- 优先在 SQL 层与热路径标量列完成过滤与聚合，消除无谓 `JSONB` 解包与重放写放大。
-- 保持轻量、模块化、高内聚低耦合，严禁单实现 `*Repository` / `InMemory*` 样板包装。
-- 随代码变动同步清理过期文档与漂移规则，降低长期迭代成本。
+`docs/plans/`、`docs/research/`、`output/` 及其他归档是按需查阅的规划、任务和验收证据。局部约束、资源假设和验收标准随原任务有效。以当前明确用户任务、现行文档和实际工程状态开展开发，发生冲突时记录必要决策。本地交付从 `output/README.md` 查找。

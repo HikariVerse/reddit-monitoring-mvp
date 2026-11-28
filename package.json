@@ -2,7 +2,7 @@
   "name": "reddit-monitoring-mvp",
   "version": "1.0.0-dev",
   "private": true,
-  "description": "Multi-platform information aggregation and visualization, evolving from a Reddit workbench",
+  "description": "Multi-source research and intelligent reporting for cross-border commerce",
   "scripts": {
     "app:api": "tsx apps/api/src/server.ts",
     "start:api": "node dist/apps/api/src/server.js",
