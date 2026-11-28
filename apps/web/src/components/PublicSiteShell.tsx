@@ -5,7 +5,7 @@ import { useI18n } from '../i18n/translations';
 import { SiftlineLogo } from './BrandMark';
 import { EditorialFooter } from './EditorialFooter';
 
-export type PublicRoute = '/' | '/product' | '/ai' | '/docs' | '__not_found__';
+export type PublicRoute = '/' | '/focus' | '/product' | '/ai' | '/docs' | '__not_found__';
 
 interface PublicSiteShellProps {
   actor: Actor | null;
@@ -31,13 +31,16 @@ export function PublicSiteShell({
   const { lang, setLang, t } = useI18n();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const navItems: Array<{ path: Exclude<PublicRoute, '__not_found__'> | '/content'; label: string }> = [
-    { path: '/', label: t('Stories', '信息流') },
+  const navItems: Array<{ path: Exclude<PublicRoute, '__not_found__' | '/product'> | '/content'; label: string; match?: PublicRoute[] }> = [
+    { path: '/', label: t('Product', '产品介绍'), match: ['/', '/product'] },
+    { path: '/focus', label: t('Signal Focus', '信息聚焦'), match: ['/focus'] },
     { path: '/content', label: t('Research', '研究分析') },
-    { path: '/product', label: t('Product', '产品介绍') },
-    { path: '/ai', label: t('AI News', 'AI 资讯') },
-    { path: '/docs', label: t('Docs', '文档') },
+    { path: '/ai', label: t('AI News', 'AI 资讯'), match: ['/ai'] },
+    { path: '/docs', label: t('Docs', '文档'), match: ['/docs'] },
   ];
+
+  const isNavActive = (item: (typeof navItems)[number]) =>
+    item.match ? item.match.includes(route) : route === item.path;
 
   const go = (path: string) => {
     setMobileOpen(false);
@@ -62,8 +65,8 @@ export function PublicSiteShell({
               <button
                 key={item.path}
                 type="button"
-                className={`ps-nav-link ${route === item.path ? 'is-active' : ''}`}
-                aria-current={route === item.path ? 'page' : undefined}
+                className={`ps-nav-link ${isNavActive(item) ? 'is-active' : ''}`}
+                aria-current={isNavActive(item) ? 'page' : undefined}
                 onClick={() => go(item.path)}
               >
                 {item.label}
@@ -112,7 +115,7 @@ export function PublicSiteShell({
             <button
               type="button"
               className="sr-btn sr-btn--dark sr-btn--sm"
-              onClick={() => onOpenWorkbench('/projects')}
+              onClick={() => onOpenWorkbench('/reports')}
             >
               <span>{t('Open Workbench', '打开工作台')}</span>
               <ArrowUpRight size={13} />
@@ -136,8 +139,8 @@ export function PublicSiteShell({
               <button
                 key={item.path}
                 type="button"
-                className={`ps-nav-link ${route === item.path ? 'is-active' : ''}`}
-                aria-current={route === item.path ? 'page' : undefined}
+                className={`ps-nav-link ${isNavActive(item) ? 'is-active' : ''}`}
+                aria-current={isNavActive(item) ? 'page' : undefined}
                 onClick={() => go(item.path)}
               >
                 {item.label}
@@ -183,7 +186,7 @@ export function PublicSiteShell({
               className="sr-btn sr-btn--dark sr-btn--sm"
               onClick={() => {
                 setMobileOpen(false);
-                onOpenWorkbench('/projects');
+                onOpenWorkbench('/reports');
               }}
             >
               {t('Open Workbench', '打开工作台')}

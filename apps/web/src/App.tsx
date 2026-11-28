@@ -50,7 +50,7 @@ const ReportsPage = lazy(() =>
 
 type AppRoute = PublicRoute | '/guide' | WorkbenchRoute;
 
-const PUBLIC_ROUTES: PublicRoute[] = ['/', '/product', '/ai', '/docs'];
+const PUBLIC_ROUTES: PublicRoute[] = ['/', '/focus', '/product', '/ai', '/docs'];
 
 const WORKBENCH_ROUTES: WorkbenchRoute[] = [
   '/reports',
@@ -405,7 +405,7 @@ export function App() {
     );
   }
 
-const PUBLIC_SITE_ROUTES = new Set(['/', '/product', '/ai', '/docs', '__not_found__']);
+const PUBLIC_SITE_ROUTES = new Set(['/', '/focus', '/product', '/ai', '/docs', '__not_found__']);
 
 function isPublicSitePath(pathname: string): boolean {
   return PUBLIC_SITE_ROUTES.has(pathname);
@@ -425,24 +425,24 @@ function isPublicSitePath(pathname: string): boolean {
               onOpenWorkbench={handleEnterWorkbench}
               switchingAccount={logoutMut.isPending}
             >
-              {loc.pathname === '/' && (
-                <PublicInfoHomePage
-                  actor={actor}
-                  onNavigate={navigate}
-                  onOpenAuth={(tab, reason) => openAuth(tab, reason, currentFullPath)}
-                />
-              )}
-
-              {loc.pathname === '/product' && (
+              {(loc.pathname === '/' || loc.pathname === '/product') && (
                 <Suspense fallback={<PageFallback label={t('Loading product overview...', '正在加载产品介绍…')} />}>
                   <Homepage
                     embedded
                     isAuthenticated={Boolean(actor)}
                     onOpenAuth={(tab = 'login') => openAuth(tab, undefined, '/reports')}
                     onEnterWorkbench={handleEnterWorkbench}
-                    onGoFeed={() => navigate('/app/feed')}
+                    onGoFeed={() => navigate('/focus')}
                   />
                 </Suspense>
+              )}
+
+              {loc.pathname === '/focus' && (
+                <PublicInfoHomePage
+                  actor={actor}
+                  onNavigate={navigate}
+                  onOpenAuth={(tab, reason) => openAuth(tab, reason, currentFullPath)}
+                />
               )}
 
               {loc.pathname === '/ai' && (

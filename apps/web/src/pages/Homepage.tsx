@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { SiftlineLogo } from '../components/BrandMark';
 import { useLogo } from '../components/brandContext';
+import { ExploreLiveDemoWidget, ReportExportLiveDemo } from '../components/public-home/ProductMotionDemos';
 import { useTheme } from '../components/themeContext';
 import { type Platform, validateSearchTerm } from '../contracts/api';
 import { useI18n } from '../i18n/translations';
@@ -27,163 +28,169 @@ interface HomepageProps {
 }
 
 const PLATFORM_OPTIONS: Array<{ value: '' | Platform; label: string; labelZh: string }> = [
-  { value: '', label: 'All Platforms', labelZh: '全平台' },
-  { value: 'reddit', label: 'Reddit', labelZh: 'Reddit 社区' },
+  { value: '', label: 'All Sources', labelZh: '全渠道资料' },
+  { value: 'reddit', label: 'Reddit Archive & Live', labelZh: 'Reddit 归档与实时' },
   { value: 'x', label: 'X (Twitter)', labelZh: 'X 平台' },
   { value: 'bluesky', label: 'Bluesky', labelZh: 'Bluesky' },
-  { value: 'web', label: 'Web / HN / RSS', labelZh: 'Web / 资讯源' },
+  { value: 'web', label: 'Signal Focus / RSS', labelZh: '信息聚焦 / 资讯源' },
 ];
 
 const SOLUTIONS_DATA = [
   {
-    key: 'siftline-one',
-    tag: 'SIFTLINE ONE',
-    titleEn: 'Track market pain across threads and live feeds',
-    titleZh: '跨社区讨论树与实时信息流追踪痛点信号',
+    key: 'one-click-report-export',
+    tag: 'ONE-CLICK REPORT EXPORT',
+    titleEn: 'Generate grounded reports & export offline interactive HTML',
+    titleZh: '一键生成研究报告与零外链离线交互 HTML 导出',
     descEn:
-      'Unify Reddit, X, Bluesky, and Hacker News into project-scoped monitoring views with thread-aware root deduplication.',
+      'Auto-discover authorized sources, run real statistical panels, synthesize BLUF executive conclusions with DeepSeek, and export a standalone interactive HTML file with light/sepia/dark themes, SVG hover tooltips, and an evidence drawer.',
     descZh:
-      '将 Reddit、X、Bluesky 与 Hacker News 聚合到项目级监测视图中，支持讨论根帖自动去重聚合。',
-    route: '/projects',
-    metric: '4 Platforms',
-    sub: 'Thread-Aware Active',
+      '自动发现已授权资料并跑通真实统计分析，经 DeepSeek 结论先行核验归纳后，一键导出单文件离线交互 HTML——自带浅色/纸感/深色三主题、SVG 悬停气泡、观点筛选与原文证据抽屉。',
+    route: '/reports',
+    metric: '4 Templates',
+    sub: 'Offline Interactive HTML',
+    chartType: 'bars',
+  },
+  {
+    key: 'one-click-explore',
+    tag: 'INTELLIGENT EXPLORE',
+    titleEn: 'One-click P01–P12 exploration across 31.5M+ archive & live posts',
+    titleZh: '一键智能洞察探索：秒级贯通 3,149 万+ 归档与实时社媒',
+    descEn:
+      'Query multi-month Reddit archives via DuckDB + FTS5 and Potion INT8 semantic clustering alongside live X and project batches, turning any discovery into a saved report with zero recomputation.',
+    descZh:
+      '基于 DuckDB + FTS5 与 Potion INT8 语义引擎，一键生成 P01–P12 声量趋势、痛点聚类、口碑情感与价格带面板，并支持将探索结果零重算直转研究报告。',
+    route: '/explore',
+    metric: 'P01–P12',
+    sub: 'DuckDB + Potion INT8',
     chartType: 'lines',
+  },
+  {
+    key: 'signal-focus',
+    tag: 'SIGNAL FOCUS',
+    titleEn: 'Focused multi-source news digests & AI release intelligence',
+    titleZh: '信息聚焦：多源去重聚合与 AI 一手发布情报',
+    descEn:
+      'Track T1/T2 tech media, official AI labs, and developer communities in one focused view with source-tier badges, rising terms, and one-click industry briefing generation.',
+    descZh:
+      '按频道追踪官方 AI 实验室、工程社区与 T1/T2 科技媒体，自动多源印证去重与热词升温识别，浏览时一键生成行业情报简报。',
+    route: '/focus',
+    metric: 'Multi-Source',
+    sub: 'T1/T2 · Daily Digest',
+    chartType: 'bubbles',
+  },
+  {
+    key: 'four-templates-schedule',
+    tag: 'WORKBENCH & SCHEDULES',
+    titleEn: 'Four business report templates & automated periodic runs',
+    titleZh: '四大业务场景模板与自动周期报告调度',
+    descEn:
+      'Choose Industry Briefing, E-Commerce Research, Social Listening, or Custom Modules, and schedule idempotent daily/weekly automated report generation.',
+    descZh:
+      '内置行业简报、电商研究、社媒舆情与自定义模块四大场景，支持幂等槽位约束的自动周期报告产出与随时暂停恢复。',
+    route: '/reports',
+    metric: 'Auto Slot',
+    sub: 'Industry · Commerce · Social',
+    chartType: 'gauge',
+  },
+  {
+    key: 'project-l1-l2-l3',
+    tag: 'RESEARCH SPACE',
+    titleEn: 'Five-tab project space with L1/L2/L3 competitive analysis',
+    titleZh: '项目五页签研究空间与 L1/L2/L3 竞品深度对比',
+    descEn:
+      'Organize overview, data pools, Explore/L1–L3 analytics, continuous monitors, and persisted reports in one workspace with Jaccard overlap and distinctive term comparisons.',
+    descZh:
+      '围绕概览、研究资料、分析与探索、采集与监测、研究报告五大页签沉淀课题，支持多品牌声量、Jaccard 重叠度与差异词量化对比。',
+    route: '/projects',
+    metric: '5 Tabs',
+    sub: 'L1 · L2 · L3 Analytics',
+    chartType: 'lines',
+  },
+  {
+    key: 'bounded-collect-monitor',
+    tag: 'LIVE COLLECTION & MONITORS',
+    titleEn: 'Preflight-budgeted live collection & continuous monitors',
+    titleZh: '预检限额实时补采与持续监测闭环',
+    descEn:
+      'Estimate provider quota before every crawl, run bounded TwitterAPIs/X keyword collection into auto-attached batches, and pause or resume monitors cleanly.',
+    descZh:
+      '所有外部采集强制预检配额与显式确认，限额拉取 X 等社媒新样本后自动挂接项目并续跑分析，监测计划支持一键暂停与恢复。',
+    route: '/sources',
+    metric: 'Budget Guard',
+    sub: 'Preflight · Pause / Resume',
+    chartType: 'gauge',
   },
   {
     key: 'thread-radar',
     tag: 'THREAD RADAR',
     titleEn: 'Inspect nested discussions up to 32 hops deep',
-    titleZh: '深层还原最高 32 跳嵌套评论树结构',
+    titleZh: '深层还原最高 32 跳嵌套评论树与原声检索',
     descEn:
       'Switch cleanly between top-scored replies, filter-matched branches, and original poster follow-ups without triggering paid crawls.',
     descZh:
-      '在热评排序、条件命中分支与楼主回复三大只读视图间秒级切换，永不误触收费抓包。',
+      '在热评排序、条件命中分支与楼主回复三大只读视图间秒级切换，配合痛点筛选与个人批注快速核验原始语境。',
     route: '/content',
-    metric: '200 nodes',
+    metric: '32 Hops',
     sub: 'Top · Matches · OP',
-    chartType: 'gauge',
-  },
-  {
-    key: 'pain-signals',
-    tag: 'SIGNAL ENGINE',
-    titleEn: 'Surface high-friction buyer pain automatically',
-    titleZh: '自动识别高摩擦痛点词与热议讨论信号',
-    descEn:
-      'Combine bilingual pain regex matching, high comment-to-score heuristics, and NFKC 3-character boolean query terms.',
-    descZh:
-      '融合中英文痛点正则、高评论比启发式规则与 NFKC 三字符布尔检索组，秒级筛出高价值吐槽。',
-    route: '/content',
-    metric: 'NFKC >= 3',
-    sub: 'Boolean + Pain Regex',
     chartType: 'bubbles',
   },
   {
-    key: 'hydrate',
-    tag: 'ON-DEMAND HYDRATION',
-    titleEn: 'Hydrate Reddit root comments with idempotency',
-    titleZh: '按需批量水合 Reddit 主帖评论并严格幂等',
+    key: 'evidence-grounding',
+    tag: 'EVIDENCE GROUNDING',
+    titleEn: 'Zero-hallucination citation guard & traceable evidence drawer',
+    titleZh: '防虚构引用校验与可溯源原文证据抽屉',
     descEn:
-      'Select 1 to 30 Reddit root posts directly from project explorer and dispatch idempotent hydration jobs with progress polling.',
+      'Every AI finding is validated against computed metric IDs and real document IDs (E-01..E-xx), with pure-data fallback if an LLM call times out.',
     descZh:
-      '在项目上下文内勾选 1~30 条 Reddit 主帖，自动携带 Idempotency-Key 下发评论水合队列并轮询进度。',
-    route: '/content',
-    metric: '1..30 posts',
-    sub: 'Max 50 replies/post',
-    chartType: 'bars',
-  },
-  {
-    key: 'observations',
-    tag: 'OBSERVATION SNAPSHOTS',
-    titleEn: 'Compare metric trajectories across snapshots',
-    titleZh: '多快照指标演变与时间基准透明留痕',
-    descEn:
-      'Plot separate time series per source, provider, and metric while honoring sourceObservedAt fallback and null gap integrity.',
-    descZh:
-      '严格按（来源、渠道、指标）分组连线，标注 provider_snapshot 时间基准且保持 null 断档不补零。',
-    route: '/content',
-    metric: 'Multi-Obs',
-    sub: 'Provider Attribution',
-    chartType: 'lines',
-  },
-  {
-    key: 'push-ingest',
-    tag: 'PUSH PIPELINE',
-    titleEn: 'Ingest external tickets via Machine API Keys',
-    titleZh: '通过机器 API Key 批量推流接入外部工单',
-    descEn:
-      'Validate 1 MiB batch limits, 4 KiB titles, and perpetual Idempotency-Key deduplication on external_ingest sources.',
-    descZh:
-      '内建 1 MiB 批负载与单条大小校验、43 位一次性 Bearer 密钥隔离及永续幂等防重入。',
-    route: '/sources',
-    metric: '<= 1 MiB',
-    sub: '1..100 items / batch',
-    chartType: 'bars',
-  },
-  {
-    key: 'budget-guard',
-    tag: 'QUOTA & UNBLOCK',
-    titleEn: 'Enforce daily & monthly vendor quota caps',
-    titleZh: '日/月请求与资源双配额防线及付费确认解锁',
-    descEn:
-      'Prevent runaway vendor charges with conservative budget meters, optimistic locking, and explicit charge acknowledgement.',
-    descZh:
-      '在任务触发前用保守预留配额拦截超限风险，并针对 unknown/starting 状态任务强制显式收费确认。',
-    route: '/sources',
-    metric: '7 Providers',
-    sub: 'Live Budget Meters',
-    chartType: 'gauge',
-  },
-  {
-    key: 'streaming-export',
-    tag: 'STREAMING EXPORT',
-    titleEn: 'Verify complete JSON & formula-safe CSV streams',
-    titleZh: '校验式流式导出 JSON 与防注入 CSV 报表',
-    descEn:
-      'Stream up to 50,000 rows per batch, verify result.complete === true before saving, and resume truncated exports via nextCursor.',
-    descZh:
-      '支持单批最高 5 万行流式下载、严格校验 result.complete === true 与游标续段导出。',
-    route: '/content',
-    metric: '50,000 rows',
-    sub: 'nextCursor Resume',
+      '每条 AI 结论严格绑定已算指标与真实原文编号（E-01..E-xx），自动剔除无依据引用并在模型超时时无缝降级交付纯数据报告。',
+    route: '/reports',
+    metric: '100% Grounded',
+    sub: 'E-xx Citation Check',
     chartType: 'bars',
   },
   {
     key: 'workspace-rbac',
-    tag: 'TEAM RBAC',
-    titleEn: 'Role-isolated research assets & saved filters',
-    titleZh: '三角色权限矩阵与个人研究查询沉淀',
+    tag: 'SECURITY & RBAC',
+    titleEn: 'Role-isolated scopes, archive grants & instant revocation',
+    titleZh: '三角色权限矩阵、归档显式授权与实时撤权',
     descEn:
-      'Empower viewers to save queries and optimistic-locked annotations while reserving collection and budgets for admins and owners.',
+      'Isolate private batches and R4 archive grants across accounts, re-verifying permissions on report reads, evidence lookups, and HTML exports.',
     descZh:
-      'owner/admin 管控采集与密钥，viewer 可在个人工作区自由保存查询条件与乐观锁批注。',
+      'Owner/Admin/Viewer 严格权限隔离，R4 归档与私有批次按账号显式授权，报告查阅、证据下钻与导出全程实时复核权限。',
     route: '/workspace',
     metric: '3 Roles',
-    sub: 'Owner · Admin · Viewer',
-    chartType: 'bubbles',
+    sub: 'Scope-Level Isolation',
+    chartType: 'gauge',
   },
 ];
 
 const STATS_DATA = [
   {
-    num: '7',
-    labelEn: 'Integrated collector providers',
-    labelZh: '已集成采集渠道',
-    descEn: 'Capability-driven integration across Reddit, X, Bluesky, Hacker News, and allowlisted HTTPS feeds.',
-    descZh: '覆盖 Reddit、X、Bluesky、Hacker News 与白名单订阅源，全表单受能力矩阵实时约束。',
+    num: '12',
+    labelEn: 'Intelligent Explore Panels (P01–P12)',
+    labelZh: 'P01–P12 一键智能洞察分析面板',
+    descEn:
+      'Covers volume trends, community engagement, lexical features, Potion INT8 semantic topic clusters, sentiment, active demand, pain points, and price bands.',
+    descZh:
+      '一键覆盖声量趋势、社区互动、高区分度短语、Potion INT8 语义聚类、情感口碑、主动需求、产品痛点与价格带决策阶段。',
   },
   {
-    num: '50K',
-    labelEn: 'Streaming Export Row Limit',
-    labelZh: '单段流式导出行数上限',
-    descEn: 'Unbuffered JSON and formula-sanitized CSV exports with strict completion verification and cursor resume.',
-    descZh: '无缓冲直传 JSON 与防公式注入 CSV，强制校验流完整性并支持 nextCursor 续段下载。',
+    num: '4',
+    labelEn: 'Business Report Templates & Offline HTML Export',
+    labelZh: '四大业务报告模板与零外链离线导出',
+    descEn:
+      'Industry Briefing, E-Commerce Research, Social Listening, and Custom Reports—exportable as standalone interactive HTML with zero external scripts.',
+    descZh:
+      '涵盖行业简报、电商研究、社媒舆情与自定义报告，一键导出自带主题切换、SVG 气泡、观点筛选与证据抽屉的单文件离线 HTML。',
   },
   {
-    num: '32',
-    labelEn: 'Thread Ancestor Hop Depth',
-    labelZh: '讨论评论树溯源深度上限',
-    descEn: 'Trace nested replies back to discussion roots with explicit contextMissing & capped guardrails.',
-    descZh: '支持 0~32 层深度的父子评论缩进树，自动识别孤儿节点并标注父链缺失状态。',
+    num: '31.5M+',
+    labelEn: 'Offline Archive Posts + Live Multi-Source Fusion',
+    labelZh: '离线社区归档与实时多源融合底座',
+    descEn:
+      'Combine DuckDB + FTS5 archive discovery with live X collection, Signal Focus RSS digests, and strict role-based access controls.',
+    descZh:
+      '融合 DuckDB + FTS5 高速历史归档检索、实时社媒限额补采与信息聚焦多源日报，全程保留统计口径与权限边界。',
   },
 ];
 
@@ -197,36 +204,40 @@ const CHANNEL_PREVIEW_GROUPS = [
 
 const RESOURCES_DATA = [
   {
-    titleEn: 'How Thread-Aware Folding Turns Scattered Replies Into Actionable Signal',
-    titleZh: '讨论根帖上溯折叠如何把碎片化评论还原为完整需求脉络',
-    descEn: 'Learn why matching a depth-3 comment and anchoring to its root thread reveals true buyer intent.',
-    descZh: '了解当深层评论命中痛点词时，上溯至讨论根帖如何避免丢失上下文误判。',
-    tags: ['Guide', 'Thread Radar'],
+    titleEn: 'From One Question to an Offline Interactive HTML Report in Minutes',
+    titleZh: '从一个业务问题到单文件离线交互 HTML 报告：全自动研究闭环拆解',
+    descEn: 'See how resource discovery, DuckDB/Potion analytics, and BLUF synthesis eliminate manual copy-pasting.',
+    descZh: '详解自动资料发现、12 维统计分析与 BLUF 结论先行归纳如何省去人工搬运数据与拼接文案。',
+    tags: ['Report Export', 'BLUF Workflow'],
     tone: 'opal',
+    route: '/reports',
   },
   {
-    titleEn: 'Why Stored-Sample Dashboards Never Zero-Fill Uncollected Dates',
-    titleZh: '为什么专业分析面板绝不对未采集空缺日期补零连线',
-    descEn: 'Visual integrity rules that separate real demand drops from source collection gaps.',
-    descZh: '拆解真实讨论热度下滑与采集调度窗口空缺之间的统计边界。',
-    tags: ['Methodology', 'Visualization'],
+    titleEn: 'Inside One-Click Explore: P01–P12 Panels Powered by DuckDB + Potion INT8',
+    titleZh: '一键智能洞察探索：DuckDB 与 Potion INT8 如何秒级跑通 12 项业务分析',
+    descEn: 'Discover how phrase-verified FTS5 queries, stratified sampling, and semantic clustering surface real buyer pain.',
+    descZh: '拆解精准短语核验、分层抽样与语义聚类如何从海量讨论中提炼产品痛点、价位带与代表原声。',
+    tags: ['Explore P01–P12', 'Semantics'],
     tone: 'dark',
+    route: '/explore',
   },
   {
-    titleEn: 'Designing Safe Paid Crawl Operations With Conservative Quotas',
-    titleZh: '用保守预留配额与收费确认机制守住第三方抓取成本底线',
-    descEn: 'Practical guardrails for unknown-phase jobs, source blocking, and idempotent retries.',
-    descZh: '解析 starting/unknown 任务锁源机制、Idempotency-Key 缓存与配额门禁设计。',
-    tags: ['Architecture', 'Collection Ops'],
+    titleEn: 'Zero-Hallucination Grounding & Pure-Data Fallback Architecture',
+    titleZh: '零虚构引用校验与纯数据降级：让每一条 AI 结论都有原声可查',
+    descEn: 'How strict scope/metric/evidence ID grounding protects decision quality and handles LLM faults gracefully.',
+    descZh: '解析服务端如何逐条核验指标与 E-xx 证据引用，并在模型超时时无缝保留快照交付纯数据报告。',
+    tags: ['Grounding', 'Trust & Safety'],
     tone: 'wisteria',
+    route: '/reports',
   },
   {
-    titleEn: 'Streaming 50,000-Row Exports Without Truncation Blindspots',
-    titleZh: '五万行级流式导出：完整性校验与游标续传实战',
-    descEn: 'Validate result.complete === true and sanitize CSV cells against spreadsheet injection.',
-    descZh: '如何通过 Fetch 流校验完整标记位并安全防注入导出研究数据集。',
-    tags: ['Engineering', 'Exports'],
+    titleEn: 'Preflight Quotas & Scope Isolation for Multi-Role Research Teams',
+    titleZh: '限额预检与范围级撤权：多角色研究团队的数据安全与成本防线',
+    descEn: 'Keep paid external collection strictly bounded while enforcing instant permission checks across projects and exports.',
+    descZh: '介绍第三方采集预算预检、暂停恢复闭环以及跨账户报告与归档权限实时复核机制。',
+    tags: ['Collection Ops', 'RBAC'],
     tone: 'opal',
+    route: '/sources',
   },
 ];
 
@@ -327,19 +338,17 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
 
   // Hero query pill
   const [heroQuery, setHeroQuery] = useState('');
+  const [heroMode, setHeroMode] = useState<'explore' | 'report'>('report');
   const [heroPlatform, setHeroPlatform] = useState<'' | Platform>('');
   const [scopeOpen, setScopeOpen] = useState(false);
   const [scopeFilter, setScopeFilter] = useState('');
   const [heroError, setHeroError] = useState<string | null>(null);
 
-  // Promo widget interactive state
-  const [promoPlatform, setPromoPlatform] = useState<'all' | 'reddit' | 'x' | 'bluesky'>('all');
-  const [promoSignal, setPromoSignal] = useState<'all' | 'pain' | 'discussion'>('all');
-
   // Solutions accordion + carousel
   const [expandedSol, setExpandedSol] = useState<string | null>(null);
   const solTrackRef = useRef<HTMLDivElement>(null);
   const resTrackRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   // Stats active row
   const [activeStat, setActiveStat] = useState(0);
@@ -348,6 +357,29 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
     const onScroll = () => setScrolled(window.scrollY > 24);
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const nodes = Array.from(root.querySelectorAll<HTMLElement>('[data-hp-reveal]'));
+    if (typeof IntersectionObserver === 'undefined') {
+      nodes.forEach((n) => n.classList.add('is-visible'));
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-visible');
+            io.unobserve(entry.target);
+          }
+        }
+      },
+      { threshold: 0.08, rootMargin: '0px 0px -30px 0px' },
+    );
+    nodes.forEach((n) => io.observe(n));
+    return () => io.disconnect();
   }, []);
 
   const handleHeroSubmit = (e: React.FormEvent) => {
@@ -361,11 +393,16 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
         return;
       }
     }
+    if (heroMode === 'report') {
+      const qs = new URLSearchParams();
+      if (trimmed) qs.set('topic', trimmed);
+      onEnterWorkbench(`/reports/new${qs.toString() ? `?${qs.toString()}` : ''}`);
+      return;
+    }
     const qs = new URLSearchParams();
-    if (trimmed) qs.set('query', trimmed);
+    if (trimmed) qs.set('q', trimmed);
     if (heroPlatform) qs.set('platform', heroPlatform);
-    const suffix = qs.toString() ? `?${qs.toString()}` : '';
-    onEnterWorkbench(`/content${suffix}`);
+    onEnterWorkbench(`/explore${qs.toString() ? `?${qs.toString()}` : ''}`);
   };
 
   const scrollTrack = (ref: React.RefObject<HTMLDivElement | null>, dir: -1 | 1) => {
@@ -377,7 +414,7 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
   );
 
   return (
-    <div className="hp-root" onClick={() => scopeOpen && setScopeOpen(false)}>
+    <div ref={rootRef} className="hp-root" onClick={() => scopeOpen && setScopeOpen(false)}>
       {!embedded && (
         <>
           {/* Top Announcement Ribbon */}
@@ -754,20 +791,50 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
           <div className="hp-hero-slash" />
         </div>
         <section className="hp-hero">
+          <div className="hp-hero-kicker">
+            <span className="hp-live-dot" aria-hidden="true" />
+            <span>
+              {t(
+                'One-Click Intelligent Explore · Automated Report & Offline HTML Export',
+                '一键智能洞察探索 · 自动生成可溯源报告与离线交互 HTML 导出',
+              )}
+            </span>
+          </div>
           <h1>
             {t(
-              'Research social conversations. Follow stories worth reading.',
-              '研究社媒讨论，跟进值得读的资讯',
+              'Explore social signals. Export evidence-backed reports in one click.',
+              '一键智能洞察探索，自动生成可溯源研究报告',
             )}
           </h1>
           <p className="hp-hero-sub">
             {t(
-              'Explore collected posts, replies, and engagement snapshots. Follow first-hand sources and compare reporting on the same event.',
-              '从已采集的帖子、评论和互动观测追溯话题变化，在信息流跟进一手信源和同一事件的多来源报道。',
+              'Connect 31.5M+ archived community discussions, live social channels, and Signal Focus digests—run P01–P12 analytics, synthesize grounded insights, and export standalone offline interactive HTML reports.',
+              '贯通 3,149 万+ 历史社区归档、实时多源社媒与信息聚焦日报。输入研究问题，一键跑通 P01–P12 多维分析、DeepSeek 结论先行归纳与零外链离线交互 HTML 报告导出。',
             )}
           </p>
 
-          {/* Hero Pill Search Container */}
+          {/* Hero Mode Toggle + Pill Search Container */}
+          <div className="hp-hero-mode-bar" role="tablist" aria-label={t('Choose launch action', '选择快速启动方式')}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={heroMode === 'report'}
+              className={`hp-hero-mode-btn ${heroMode === 'report' ? 'active' : ''}`}
+              onClick={() => setHeroMode('report')}
+            >
+              {t('One-Click Report & Export', '一键生成报告与导出')}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={heroMode === 'explore'}
+              className={`hp-hero-mode-btn ${heroMode === 'explore' ? 'active' : ''}`}
+              onClick={() => setHeroMode('explore')}
+            >
+              {t('One-Click Intelligent Explore', '一键智能洞察探索')}
+            </button>
+          </div>
+
           <form className="hp-search-tray" onSubmit={handleHeroSubmit} onClick={(e) => e.stopPropagation()}>
             <div className="hp-search-input-wrap">
               <Search size={17} color="#7a847e" />
@@ -777,21 +844,27 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
                   setHeroQuery(e.target.value);
                   setHeroError(null);
                 }}
-                placeholder={t('Enter topic, pain keyword, or phrase (e.g. pricing)', '输入监测词或痛点短语（如 pricing、latency）')}
+                placeholder={
+                  heroMode === 'report'
+                    ? t('Enter a business question (e.g. open ear headphones pain points)', '输入业务研究问题（如：开放式耳机用户痛点与口碑）')
+                    : t('Enter keyword or phrase to explore (e.g. power station, shokz)', '输入洞察关键词或短语（如：power station、shokz）')
+                }
                 aria-label="Search market signals"
               />
-              <button
-                type="button"
-                className="hp-scope-btn"
-                onClick={() => setScopeOpen((v) => !v)}
-              >
-                <span>
-                  {heroPlatform
-                    ? PLATFORM_OPTIONS.find((p) => p.value === heroPlatform)?.label
-                    : t('All', '全平台')}
-                </span>
-                <ChevronDown size={13} />
-              </button>
+              {heroMode === 'explore' && (
+                <button
+                  type="button"
+                  className="hp-scope-btn"
+                  onClick={() => setScopeOpen((v) => !v)}
+                >
+                  <span>
+                    {heroPlatform
+                      ? PLATFORM_OPTIONS.find((p) => p.value === heroPlatform)?.label
+                      : t('All', '全渠道')}
+                  </span>
+                  <ChevronDown size={13} />
+                </button>
+              )}
             </div>
 
             {scopeOpen && (
@@ -820,7 +893,7 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
             )}
 
             <button type="submit" className="sr-btn sr-btn--wisteria sr-btn--lg">
-              {t('Get insights', '立即洞察')}
+              {heroMode === 'report' ? t('Generate Report', '一键生成报告') : t('Explore Insights', '一键智能探索')}
             </button>
           </form>
 
@@ -831,8 +904,11 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
           )}
 
           <div className="hp-hero-hint">
-            <span>{t('Try instant filter:', '快速预填检索：')}</span>
-            {['pricing', 'latency', 'billing'].map((sample) => (
+            <span>{t('Try real scenarios:', '快捷体验研究方向：')}</span>
+            {(lang === 'zh'
+              ? ['开放式耳机用户痛点', '便携式储能电源', 'Claude 编程助手口碑', 'AI 行业动态']
+              : ['open ear headphones', 'power station', 'Claude coding workflow', 'AI releases']
+            ).map((sample) => (
               <button
                 key={sample}
                 type="button"
@@ -848,119 +924,69 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
           </div>
         </section>
 
-        {/* Dual Asymmetric Promo Cards (Semrush 02-promo-products) */}
-        <section className="hp-promo-grid">
+        {/* Dual Asymmetric Promo Cards — Spotlight #1: One-Click Explore + Signal Focus */}
+        <section className="hp-promo-grid hp-reveal" data-hp-reveal>
           <div className="hp-promo-card hp-promo-card--primary">
             <div className="hp-promo-hatch sem-hatch-wisteria" />
             <div className="hp-promo-copy">
-              <h2>
-                {t('Social research', '社媒研究分析')}
-              </h2>
+              <div>
+                <div className="hp-promo-pill">{t('FEATURE 01 · P01–P12', '核心亮点 01 · P01–P12 全景面板')}</div>
+                <h2>{t('One-Click Intelligent Explore', '一键智能洞察探索')}</h2>
+              </div>
               <div>
                 <p className="hp-promo-desc">
                   {t(
-                    'View topic activity over time and look up posts, comments, and timestamped observations.',
-                    '按专题查看讨论趋势，在内容检索中核对原帖、评论及带时间的指标观测。',
+                    'Run DuckDB + FTS5 retrieval and Potion INT8 semantic clustering over 31.5M+ historical threads and live social feeds. Inspect trends, pain clusters, sentiment, price bands, and turn results into a report in one click.',
+                    '贯通 3,149 万+ 离线社区归档与实时社媒，一键输出声量趋势、Potion 语义话题、产品痛点、口碑情感与价格带 12 维面板，任意发现直达原声证据并一键转研究报告。',
                   )}
                 </p>
                 <button
                   type="button"
                   className="sr-btn sr-btn--white"
-                  onClick={() => onEnterWorkbench('/projects')}
+                  onClick={() => onEnterWorkbench('/explore')}
                 >
-                  {t('Explore workbench', '进入监测工作台')}
+                  {t('Launch Intelligent Explore', '进入智能洞察探索')}
                 </button>
               </div>
             </div>
 
-            {/* Embedded Interactive Signal Overview Widget */}
+            {/* Embedded Animated One-Click Explore Showcase */}
             <div className="hp-promo-frame">
-              <div className="hp-promo-widget">
-                <div className="hp-widget-header">
-                  <h3>{t('Signal Overview', '信号全景预览')}</h3>
-                  <select
-                    className="wb-select"
-                    style={{ fontSize: 12, padding: '5px 10px' }}
-                    value={promoSignal}
-                    onChange={(e) => setPromoSignal(e.target.value as typeof promoSignal)}
-                    aria-label="Filter signal mode"
-                  >
-                    <option value="all">{t('All Signals', '全部信号')}</option>
-                    <option value="pain">{t('Pain Signals', '痛点投诉信号')}</option>
-                    <option value="discussion">{t('High Discussion', '高热讨论信号')}</option>
-                  </select>
-                </div>
-
-                <div className="hp-widget-tabs" style={{ alignSelf: 'flex-start' }}>
-                  {(['all', 'reddit', 'x', 'bluesky'] as const).map((plat) => (
-                    <button
-                      key={plat}
-                      type="button"
-                      className={`hp-widget-tab ${promoPlatform === plat ? 'active' : ''}`}
-                      onClick={() => setPromoPlatform(plat)}
-                    >
-                      {plat === 'all' ? t('All Sources', '全部') : plat.toUpperCase()}
-                    </button>
-                  ))}
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 16, alignItems: 'center' }}>
-                  <svg viewBox="0 0 140 105" style={{ width: '100%', height: 'auto' }}>
-                    <path d="M 18 82 A 52 52 0 0 1 122 82" fill="none" stroke="#e9ece6" strokeWidth="12" strokeLinecap="round" />
-                    <path
-                      d="M 18 82 A 52 52 0 0 1 114 52"
-                      fill="none"
-                      stroke="var(--sem-green)"
-                      strokeWidth="12"
-                      strokeLinecap="round"
-                    />
-                    <text x="70" y="70" textAnchor="middle" fontSize="13" fontWeight="700" fill="var(--ink)">
-                      {promoPlatform === 'all' ? 'ALL' : promoPlatform.toUpperCase()}
-                    </text>
-                    <text x="70" y="90" textAnchor="middle" fontSize="10" fontWeight="600" fill="var(--sem-green)">
-                      {t('Illustrative Demo', '交互示意')}
-                    </text>
-                  </svg>
-
-                  <svg viewBox="0 0 240 105" style={{ width: '100%', height: 'auto' }}>
-                    <line x1="12" y1="20" x2="232" y2="20" stroke="#eef1ef" />
-                    <line x1="12" y1="52" x2="232" y2="52" stroke="#eef1ef" />
-                    <line x1="12" y1="84" x2="232" y2="84" stroke="#eef1ef" />
-                    <path
-                      d={
-                        promoSignal === 'pain'
-                          ? 'M 14 78 L 58 60 L 106 64 L 154 34 L 228 20'
-                          : 'M 14 74 L 58 68 L 106 50 L 154 44 L 228 28'
-                      }
-                      fill="none"
-                      stroke="var(--purple)"
-                      strokeWidth="2.5"
-                    />
-                    <path
-                      d="M 14 82 L 58 76 L 106 72 L 154 58 L 228 48"
-                      fill="none"
-                      stroke="var(--teal)"
-                      strokeWidth="2.2"
-                    />
-                    <text x="14" y="100" fontSize="9" fill="#7c857f">{t('Day 1', '第 1 天')}</text>
-                    <text x="100" y="100" fontSize="9" fill="#7c857f">{t('Sample curve', '示意趋势')}</text>
-                    <text x="195" y="100" fontSize="9" fill="#7c857f">{t('Day N', '第 N 天')}</text>
-                  </svg>
-                </div>
-              </div>
+              <ExploreLiveDemoWidget
+                onExploreTopic={(q) => onEnterWorkbench(`/explore?q=${encodeURIComponent(q)}`)}
+              />
             </div>
           </div>
 
           <div className="hp-promo-card hp-promo-card--secondary">
             <div className="hp-promo-hatch sem-hatch-wisteria" />
-            <h2 style={{ position: 'relative', zIndex: 2 }}>
-              {t('Curated information feed', '高质量信息流')}
-            </h2>
+            <div style={{ position: 'relative', zIndex: 2 }}>
+              <div className="hp-promo-pill hp-promo-pill--ink">{t('SIGNAL FOCUS', '实时聚合 · 每日精选')}</div>
+              <h2>{t('Signal Focus', '信息聚焦')}</h2>
+            </div>
+
+            {/* Subtle Animated Live Channel Feed Preview */}
+            <div className="hp-focus-mini-list" aria-hidden="true">
+              {[
+                { tag: 'T1', title: t('AI Labs & Model Releases', 'AI 一手发布与研发动态'), meta: t('Multi-source verified', '多源印证去重') },
+                { tag: 'HOT', title: t('Tech Media & Industry Pulse', '科技媒体与产业焦点'), meta: t('Rising terms tracked', '热词升温识别') },
+                { tag: 'BRIEF', title: t('1-Click Briefing Export', '按当前频道一键出简报'), meta: t('Auto daily/weekly', '支持周期自动生成') },
+              ].map((row, idx) => (
+                <div key={row.tag} className="hp-focus-mini-row" style={{ animationDelay: `${idx * 160}ms` }}>
+                  <span className="hp-focus-mini-tag">{row.tag}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <strong>{row.title}</strong>
+                    <span>{row.meta}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
             <div style={{ position: 'relative', zIndex: 2 }}>
               <p className="hp-promo-desc">
                 {t(
-                  'Read recent stories and daily digests by topic. Source tiers and related coverage help you see where each story comes from.',
-                  '按频道阅读最新事件、热门与日报，通过来源分级和关联报道了解每条资讯的出处。',
+                  'Read focused stories and daily digests by channel with transparent source tiers, and convert any channel into an industry briefing in one click.',
+                  '按频道浏览多源去重的精选事件、热门与日报，清晰呈现来源分级与关联报道，并可一键按当前频道生成行业情报简报。',
                 )}
               </p>
               <button
@@ -968,23 +994,23 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
                 className="sr-btn sr-btn--outline"
                 onClick={onGoFeed}
               >
-                {t('Browse the feed', '浏览信息流')}
+                {t('Open Signal Focus', '进入信息聚焦')}
               </button>
             </div>
           </div>
         </section>
       </div>
 
-      {/* Connector / Source Logo Strip */}
-      <section className="hp-logos-band" aria-label="Supported data sources and protocols">
+      {/* Engine & Supply Logo Strip */}
+      <section className="hp-logos-band hp-reveal" data-hp-reveal aria-label="Supported engines and data channels">
         {[
-          { name: 'Reddit · kaix', dot: 'var(--purple)' },
-          { name: 'red_crawler', dot: 'var(--teal)' },
-          { name: 'X · scrapebadger', dot: 'var(--ink)' },
-          { name: 'twitterapis', dot: '#527bc5' },
-          { name: 'Bluesky AppView', dot: 'var(--teal)' },
-          { name: 'newsnow · HN', dot: '#d68245' },
-          { name: 'external_ingest', dot: 'var(--purple)' },
+          { name: t('31.5M+ Reddit Archive', '3,149 万+ 离线归档'), dot: 'var(--purple)' },
+          { name: 'DuckDB + Potion INT8', dot: 'var(--teal)' },
+          { name: t('X · TwitterAPIs Live', 'X · 实时限额补采'), dot: '#527bc5' },
+          { name: t('Signal Focus · RSS / HN', '信息聚焦 · RSS / HN'), dot: '#d68245' },
+          { name: t('DeepSeek Grounded LLM', 'DeepSeek 核验归纳'), dot: 'var(--purple)' },
+          { name: t('L1/L2/L3 Research Space', 'L1/L2/L3 专题研究'), dot: 'var(--teal)' },
+          { name: t('Offline Interactive HTML', '单文件交互 HTML 导出'), dot: 'var(--ink)' },
         ].map((item) => (
           <div key={item.name} className="hp-source-emblem">
             <span style={{ width: 9, height: 9, borderRadius: 2, background: item.dot, display: 'inline-block' }} />
@@ -993,67 +1019,38 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
         ))}
       </section>
 
-      {/* Enterprise Dark Showcase (03-enterprise) */}
-      <section className="hp-enterprise-wrap">
+      {/* Enterprise Dark Showcase — Spotlight #2: One-Click Report Generation & Offline Interactive HTML Export */}
+      <section className="hp-enterprise-wrap hp-reveal" data-hp-reveal>
         <div className="hp-enterprise-card">
           <div className="hp-prism-backdrop" />
           <div className="hp-enterprise-copy">
-            <h2>{t('Bigger scale. Cleaner evidence.', '更大监测规模，更干净的证据链。')}</h2>
+            <div className="hp-ent-badge">{t('FEATURE 02 · ONE-CLICK REPORT EXPORT', '核心亮点 02 · 一键报告生成与导出')}</div>
+            <h2>{t('One-click reports. Interactive offline HTML.', '一键生成报告，离线交互 HTML 随身交付。')}</h2>
             <p>
               {t(
-                'Built for research teams who refuse opaque metrics. Enforce role-based access, optimistic revision locks, and strict sample coverage disclosures across every chart.',
-                '专为追求可验证证据的研究团队打造：原生具备三角色 RBAC、乐观锁并发保护与透明的已存样本统计口径。',
+                'Cover Industry Briefings, E-Commerce Research, Social Listening, and Custom Modules. Auto-discover sources, run verified DeepSeek synthesis, and export a zero-dependency interactive HTML report with theme toggles, SVG hover tooltips, finding filters, and a traceable evidence drawer.',
+                '覆盖行业情报简报、电商市场研究、社媒舆情洞察与自定义模块四大场景。自动发现资料、完成统计与 DeepSeek 结论先行归纳，一键导出零外链离线交互 HTML——自带浅色/纸感/深色切换、SVG 悬停气泡、观点筛选与原文证据抽屉。',
               )}
             </p>
+            <div className="hp-ent-chips">
+              <span>{t('4 Business Templates', '4 大业务模板')}</span>
+              <span>{t('BLUF Conclusions', 'BLUF 结论先行')}</span>
+              <span>{t('Zero-CDN Single HTML', '零外链单文件 HTML')}</span>
+              <span>{t('Traceable Evidence Drawer', '可溯源证据抽屉')}</span>
+            </div>
             <button
               type="button"
               className="sr-btn sr-btn--outline-light"
-              onClick={() => onEnterWorkbench('/projects')}
+              onClick={() => onEnterWorkbench('/reports')}
             >
-              {t('Launch Workbench', '打开分析工作台')}
+              {t('Open Report Workbench', '打开报告工作台')}
             </button>
           </div>
 
           <div className="hp-enterprise-mock">
-            <div className="hp-enterprise-app">
-              <div className="hp-ent-rail">
-                <SiftlineLogo size={20} showWordmark={false} />
-                <div style={{ width: 26, height: 26, borderRadius: 6, background: 'rgba(var(--accent-rgb), 0.35)' }} />
-                <div style={{ width: 26, height: 26, borderRadius: 6, background: 'rgba(255,255,255,0.08)' }} />
-                <div style={{ width: 26, height: 26, borderRadius: 6, background: 'rgba(255,255,255,0.08)' }} />
-              </div>
-              <div className="hp-ent-body">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <strong style={{ fontSize: 16 }}>Project Overview · Cloud FinOps</strong>
-                  <span className="wb-pill wb-pill--green">{t('Verified Stored Data', '真实已存样本')}</span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-                  <div style={{ background: '#fff', border: '1px solid #e3e7e4', borderRadius: 6, padding: 12 }}>
-                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>Thread Anchors</div>
-                    <div style={{ fontSize: 24, fontWeight: 700, marginTop: 4 }}>2,481</div>
-                  </div>
-                  <div style={{ background: '#fff', border: '1px solid #e3e7e4', borderRadius: 6, padding: 12 }}>
-                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>Pain Hits</div>
-                    <div style={{ fontSize: 24, fontWeight: 700, marginTop: 4, color: 'var(--purple)' }}>418</div>
-                  </div>
-                  <div style={{ background: '#fff', border: '1px solid #e3e7e4', borderRadius: 6, padding: 12 }}>
-                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>Active Providers</div>
-                    <div style={{ fontSize: 24, fontWeight: 700, marginTop: 4, color: 'var(--teal)' }}>4 / 7</div>
-                  </div>
-                </div>
-                <div style={{ background: '#fff', border: '1px solid #e3e7e4', borderRadius: 6, padding: 14, flex: 1 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Benchmark · Signal Share by Source</div>
-                  <svg viewBox="0 0 420 120" style={{ width: '100%', height: 'auto' }}>
-                    <line x1="10" y1="25" x2="410" y2="25" stroke="#eef1ef" />
-                    <line x1="10" y1="60" x2="410" y2="60" stroke="#eef1ef" />
-                    <line x1="10" y1="95" x2="410" y2="95" stroke="#eef1ef" />
-                    <path d="M 16 74 L 78 64 L 140 69 L 204 42 L 268 48 L 332 28 L 402 22" fill="none" stroke="var(--purple)" strokeWidth="2.4" />
-                    <path d="M 16 86 L 78 82 L 140 76 L 204 72 L 268 62 L 332 58 L 402 49" fill="none" stroke="var(--teal)" strokeWidth="2.2" />
-                    <path d="M 16 90 L 78 88 L 140 85 L 204 81 L 268 78 L 332 74 L 402 70" fill="none" stroke="var(--apricot)" strokeWidth="2" />
-                  </svg>
-                </div>
-              </div>
-            </div>
+            <ReportExportLiveDemo
+              onLaunchReports={(tpl) => onEnterWorkbench(`/reports/new?template=${tpl}`)}
+            />
           </div>
         </div>
       </section>
@@ -1122,7 +1119,7 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
                         <button
                           type="button"
                           className="sr-btn sr-btn--dark"
-                          onClick={() => onEnterWorkbench(sol.route)}
+                          onClick={() => (sol.route === '/focus' && onGoFeed ? onGoFeed() : onEnterWorkbench(sol.route))}
                         >
                           {t('Open Module', '打开对应面板')}
                         </button>
@@ -1181,34 +1178,43 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
       </section>
 
       {/* Dark Community Signal Visibility Index (07-ai-index-top & 08-ai-index-ranking) */}
-      <section id="index" className="hp-index-band">
+      <section id="index" className="hp-index-band hp-reveal" data-hp-reveal>
         <div className="hp-index-curtain" />
         <div className="hp-index-inner">
           <div className="hp-sparkle-badge">
             <Sparkles size={38} color="var(--white)" />
           </div>
           <h2 className="hp-index-title">
-            {t('COMMUNITY SIGNAL INDEX', '社区讨论信号指数')}
+            {t('SIGNAL FOCUS CHANNELS', '信息聚焦与社媒阵地')}
           </h2>
           <p className="hp-index-sub">
             {t(
-              'Explore where engineering pain points and product friction surface first across stored-sample channels.',
-              '实时观测产品痛点与技术摩擦最先爆发的社区阵地（基于已存样本口径）。',
+              'Explore where industry breakthroughs, product pain points, and developer debates surface first—then turn any channel into a briefing.',
+              '实时追踪行业突破、产品痛点与社区热议最先浮现的阵地，并一键转化为研究简报。',
             )}
           </p>
-          <button
-            type="button"
-            className="sr-btn sr-btn--wisteria"
-            onClick={() => onEnterWorkbench('/content?signal=pain')}
-          >
-            {t('Explore pain signals', '探索痛点信号')} <ArrowUpRight size={16} />
-          </button>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <button
+              type="button"
+              className="sr-btn sr-btn--wisteria"
+              onClick={() => onEnterWorkbench('/explore')}
+            >
+              {t('One-Click Explore', '一键智能洞察探索')} <ArrowUpRight size={16} />
+            </button>
+            <button
+              type="button"
+              className="sr-btn sr-btn--outline-light"
+              onClick={onGoFeed}
+            >
+              {t('Browse Signal Focus', '进入信息聚焦')} <ArrowUpRight size={16} />
+            </button>
+          </div>
 
           <div className="hp-leaderboard">
             <div className="hp-lb-head">
-              <span>{t('Channel Group', '信息流频道分组')}</span>
+              <span>{t('Channel Group', '信息聚焦频道分组')}</span>
               <span>{t('Scope', '覆盖范围')}</span>
-              <span className="hp-lb-meta">{t('Live counts available in Stories Feed', '实时条数请查看公开信息流')}</span>
+              <span className="hp-lb-meta">{t('Live counts in Signal Focus', '实时条数请查看信息聚焦')}</span>
             </div>
             {CHANNEL_PREVIEW_GROUPS.map((row) => (
               <div key={row.group} className="hp-lb-row">
@@ -1226,7 +1232,7 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
       </section>
 
       {/* Resources Horizontal Carousel (10-resources) */}
-      <section className="hp-section" style={{ paddingTop: 12 }}>
+      <section className="hp-section hp-reveal" data-hp-reveal style={{ paddingTop: 12 }}>
         <div className="hp-section-top">
           <div>
             <div className="hp-eyebrow">
@@ -1261,7 +1267,7 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
             <article
               key={idx}
               className="hp-res-card"
-              onClick={() => onEnterWorkbench('/projects')}
+              onClick={() => onEnterWorkbench(res.route)}
             >
               <div
                 className="hp-res-cover"

@@ -9,7 +9,7 @@ interface EditorialFooterProps {
   onOpenWorkbench: (targetPath?: string) => void;
 }
 
-const workbenchPath = '/projects';
+const workbenchPath = '/reports';
 
 export function EditorialFooter({ brand, onNavigate, onOpenWorkbench }: EditorialFooterProps) {
   const { lang, setLang, t } = useI18n();
@@ -17,15 +17,15 @@ export function EditorialFooter({ brand, onNavigate, onOpenWorkbench }: Editoria
     {
       title: t('Explore', '探索'),
       links: [
-        { path: '/', label: t('Information Feed', '信息流') },
+        { path: '/', label: t('Product Overview', '产品介绍') },
+        { path: '/focus', label: t('Signal Focus', '信息聚焦') },
         { path: '/ai', label: t('AI News', 'AI 资讯') },
-        { path: '/product', label: t('Product Overview', '产品介绍') },
       ],
     },
     {
       title: t('Product & Resources', '产品与资源'),
       links: [
-        { path: workbenchPath, label: t('Workbench', '工作台') },
+        { path: workbenchPath, label: t('Reports & Workbench', '报告与工作台') },
         { path: '/docs', label: t('Documentation', '文档中心') },
         { path: '/guide', label: t('Product Guide', '产品指南') },
       ],
