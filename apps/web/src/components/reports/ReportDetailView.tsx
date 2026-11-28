@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import {
   ArrowLeft,
+  Check,
+  Copy,
   Download,
   ExternalLink,
   FolderKanban,
@@ -19,11 +21,11 @@ import { formatApiError } from '../../api/hooks';
 import { safeHttpUrl } from '../../lib/sourceLabels';
 import { ReportChartRenderer } from './ReportChartRenderer';
 
-const KIND_LABELS: Record<string, { label: string; color: string }> = {
-  observation: { label: '观察事实', color: '#0f766e' },
-  interpretation: { label: '分析解读', color: '#2563eb' },
-  hypothesis: { label: '待验证假设', color: '#d97706' },
-  recommendation: { label: '业务建议', color: '#7c3aed' },
+const KIND_LABELS: Record<string, { label: string; color: string; bg: string }> = {
+  observation: { label: '观察事实', color: '#0f766e', bg: '#f0fdfa' },
+  interpretation: { label: '分析解读', color: '#2563eb', bg: '#eff6ff' },
+  hypothesis: { label: '待验证假设', color: '#b45309', bg: '#fffbeb' },
+  recommendation: { label: '业务建议', color: '#7c3aed', bg: '#f5f3ff' },
 };
 
 const TEMPLATE_LABELS: Record<string, string> = {
@@ -32,6 +34,28 @@ const TEMPLATE_LABELS: Record<string, string> = {
   social: '社媒舆情洞察',
   custom: '自定义研究报告',
 };
+
+function splitReadableParagraphs(text: string): string[] {
+  const cleaned = text.trim();
+  if (!cleaned) return [];
+  const explicit = cleaned.split(/\n+/).map((p) => p.trim()).filter(Boolean);
+  if (explicit.length > 1) return explicit;
+  if (cleaned.length <= 180) return [cleaned];
+  const sentences = cleaned.split(/(?<=[。！？!?])\s*/).filter(Boolean);
+  if (sentences.length <= 2) return [cleaned];
+  const chunks: string[] = [];
+  let buf = '';
+  for (const s of sentences) {
+    if (buf && buf.length + s.length > 165) {
+      chunks.push(buf);
+      buf = s;
+    } else {
+      buf += s;
+    }
+  }
+  if (buf) chunks.push(buf);
+  return chunks;
+}
 
 export function ReportDetailView({
   reportId,
@@ -43,7 +67,11 @@ export function ReportDetailView({
   const detailQuery = useReportDetailQuery(reportId);
   const runActionMut = useReportRunActionMutation();
   const [drawerState, setDrawerState] = useState<{ title: string; items: ReportEvidenceItem[] } | null>(null);
+  const [drawerSearch, setDrawerSearch] = useState('');
   const [regenNotice, setRegenNotice] = useState<string | null>(null);
+  const [kindFilter, setKindFilter] = useState<'all' | 'observation' | 'interpretation' | 'hypothesis' | 'recommendation'>('all');
+  const [findingQuery, setFindingQuery] = useState('');
+  const [copiedSummary, setCopiedSummary] = useState(false);
 
   const report = detailQuery.data?.report;
   const evidenceMap = useMemo(
@@ -53,8 +81,37 @@ export function ReportDetailView({
 
   const openEvidence = (ids: string[], title: string) => {
     const items = ids.map((id) => evidenceMap.get(id)).filter((x): x is ReportEvidenceItem => Boolean(x));
-    setDrawerState({ title, items: items.length ? items : (report?.evidence ?? []).slice(0, 10) });
+    setDrawerSearch('');
+    setDrawerState({ title, items: items.length ? items : (report?.evidence ?? []).slice(0, 12) });
   };
+
+  const filteredDrawerItems = useMemo(() => {
+    if (!drawerState) return [];
+    const q = drawerSearch.trim().toLowerCase();
+    if (!q) return drawerState.items;
+    return drawerState.items.filter((ev) =>
+      `${ev.id} ${ev.title} ${ev.excerpt} ${ev.community ?? ''} ${ev.sourceLabel}`.toLowerCase().includes(q),
+    );
+  }, [drawerSearch, drawerState]);
+
+  const totalFindingsCount = useMemo(
+    () => (report?.sections ?? []).reduce((sum, s) => sum + (s.narrative?.findings?.length ?? 0), 0),
+    [report?.sections],
+  );
+
+  const matchedFindingsCount = useMemo(() => {
+    const q = findingQuery.trim().toLowerCase();
+    return (report?.sections ?? []).reduce(
+      (sum, s) =>
+        sum +
+        (s.narrative?.findings ?? []).filter(
+          (f) =>
+            (kindFilter === 'all' || f.kind === kindFilter) &&
+            (!q || `${f.title} ${f.text}`.toLowerCase().includes(q)),
+        ).length,
+      0,
+    );
+  }, [findingQuery, kindFilter, report?.sections]);
 
   if (detailQuery.isPending) {
     return (
@@ -87,6 +144,23 @@ export function ReportDetailView({
     model?: string | null;
     usage?: { totalTokens?: number; callCount?: number; requestIds?: string[] };
   };
+  const primaryRange = report.scopes[0]?.range;
+  const rangeLabel =
+    primaryRange?.from || primaryRange?.to
+      ? `${primaryRange.from?.slice(0, 10) || '—'} 至 ${primaryRange.to?.slice(0, 10) || '—'}`
+      : '当前窗口';
+
+  const handleCopySummary = async () => {
+    const execText = report.sections[0]?.narrative?.summary || report.summary;
+    const text = `${report.title}\n${report.subtitle}\n\n${execText}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedSummary(true);
+      window.setTimeout(() => setCopiedSummary(false), 2000);
+    } catch {
+      // ignore clipboard errors in restricted contexts
+    }
+  };
 
   return (
     <div className="ds-page" style={{ display: 'grid', gap: 16 }}>
@@ -102,7 +176,7 @@ export function ReportDetailView({
           flexWrap: 'wrap',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <button type="button" className="ds-btn ds-btn--ghost" onClick={() => onNavigate('/reports?view=list')}>
             <ArrowLeft size={13} />
             <span>返回我的报告</span>
@@ -138,26 +212,30 @@ export function ReportDetailView({
               <span>回到探索结果</span>
             </button>
           )}
+          <button type="button" className="ds-btn ds-btn--ghost" onClick={() => void handleCopySummary()}>
+            {copiedSummary ? <Check size={13} /> : <Copy size={13} />}
+            <span>{copiedSummary ? '已复制摘要' : '复制摘要'}</span>
+          </button>
           <button type="button" className="ds-btn ds-btn--ghost" onClick={() => window.print()}>
             <Printer size={13} />
             <span>打印</span>
           </button>
           <a className="ds-btn" href={reportsApi.exportUrl(report.id)} download style={{ textDecoration: 'none' }}>
             <Download size={13} />
-            <span>导出离线 HTML</span>
+            <span>导出交互 HTML</span>
           </a>
         </div>
       </div>
 
       {regenNotice && <div className="wb-alert wb-alert--success">{regenNotice}</div>}
 
-      {/* Main Layout: Sticky TOC + Research Document */}
-      <div style={{ display: 'grid', gridTemplateColumns: '220px minmax(0, 1fr)', gap: 18, alignItems: 'start' }}>
+      {/* Main Layout: Sticky TOC + Editorial Research Document */}
+      <div style={{ display: 'grid', gridTemplateColumns: '232px minmax(0, 1fr)', gap: 18, alignItems: 'start' }}>
         <aside className="ds-card" style={{ padding: 14, position: 'sticky', top: 16 }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 8 }}>
             报告目录 · CONTENTS
           </div>
-          <nav style={{ display: 'grid', gap: 4 }}>
+          <nav style={{ display: 'grid', gap: 3 }}>
             {report.sections.map((sec, idx) => (
               <a
                 key={sec.id}
@@ -179,160 +257,325 @@ export function ReportDetailView({
               </a>
             ))}
           </nav>
-          <div style={{ borderTop: '1px solid var(--line)', marginTop: 12, paddingTop: 10, fontSize: 11.5, color: 'var(--muted)' }}>
+          <div style={{ borderTop: '1px solid var(--line)', marginTop: 12, paddingTop: 10, fontSize: 11.5, color: 'var(--muted)', display: 'grid', gap: 4 }}>
             <div>生成时间：{report.createdAt.slice(0, 16).replace('T', ' ')} UTC</div>
             <div>保存证据：{report.evidence.length} 条</div>
             <button
               type="button"
-              className="ds-btn ds-btn--quiet"
-              style={{ marginTop: 6, padding: '4px 0', fontSize: 12 }}
-              onClick={() => setDrawerState({ title: '本报告全部代表性原文证据', items: report.evidence })}
+              className="ds-btn ds-btn--ghost"
+              style={{ marginTop: 6, width: '100%', justifyContent: 'center', fontSize: 12 }}
+              onClick={() => {
+                setDrawerSearch('');
+                setDrawerState({ title: '本报告全部代表性原文证据', items: report.evidence });
+              }}
             >
               查看全部证据清单 →
             </button>
           </div>
         </aside>
 
-        <article className="ds-card" style={{ padding: '28px 32px', display: 'grid', gap: 24 }}>
-          {/* Report Cover Header */}
-          <header style={{ borderBottom: '2px solid var(--wb-purple-deep)', paddingBottom: 16 }}>
-            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 700, margin: '0 0 8px' }}>
+        <article className="ds-card" style={{ padding: '28px 34px', display: 'grid', gap: 22 }}>
+          {/* Executive Hero Cover Band */}
+          <header
+            style={{
+              background: 'linear-gradient(135deg, #f0fdfa 0%, #f8fafc 100%)',
+              border: '1px solid #99f6e4',
+              borderRadius: 12,
+              padding: '22px 24px',
+            }}
+          >
+            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 25, fontWeight: 750, lineHeight: 1.3, margin: '0 0 8px' }}>
               {report.title}
             </h1>
-            <p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>{report.subtitle}</p>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 10, fontSize: 12, color: 'var(--faint)' }}>
+            <p style={{ fontSize: 14, color: 'var(--ink-3)', margin: 0, lineHeight: 1.6 }}>{report.subtitle}</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: 10, marginTop: 16 }}>
+              <div style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: 8, padding: '9px 12px' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>有效分析样本</div>
+                <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                  {report.analyzedCount.toLocaleString()}
+                </div>
+              </div>
+              <div style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: 8, padding: '9px 12px' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>时间覆盖窗口</div>
+                <div style={{ fontSize: 13.5, fontWeight: 700, marginTop: 4 }}>{rangeLabel}</div>
+              </div>
+              <div style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: 8, padding: '9px 12px' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>研究章节</div>
+                <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                  {report.sections.length} 章
+                </div>
+              </div>
+              <div style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: 8, padding: '9px 12px' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>可溯源证据</div>
+                <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                  {report.evidence.length} 条
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 10, fontSize: 11.5, color: 'var(--faint)' }}>
               <span>版本 v{report.reportVersion}</span>
               <span>· 历史报告快照（项目后续变动不影响本报告内容）</span>
+              {report.projectDeleted && <span>· 关联研究已删除，快照仍完整保留</span>}
             </div>
           </header>
 
-          {/* Sections */}
-          {report.sections.map((sec, idx) => (
-            <section
-              key={sec.id}
-              id={`report-sec-${sec.id}`}
-              style={{ borderBottom: '1px solid var(--line)', paddingBottom: 22, display: 'grid', gap: 10 }}
+          {/* Finding Filter & Search Toolbar */}
+          {totalFindingsCount > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 10,
+                flexWrap: 'wrap',
+                paddingBottom: 12,
+                borderBottom: '1px solid var(--line)',
+              }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--wb-purple-deep)' }}>
-                    CHAPTER {String(idx + 1).padStart(2, '0')}
-                  </div>
-                  <h2 style={{ fontSize: 18, fontWeight: 700, margin: '3px 0 0' }}>
-                    {sec.narrative?.heading || sec.title}
-                  </h2>
-                </div>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  {sec.evidenceIds.length > 0 && (
-                    <button
-                      type="button"
-                      className="ds-btn ds-btn--ghost"
-                      style={{ fontSize: 11.5 }}
-                      onClick={() => openEvidence(sec.evidenceIds, `${sec.title} · 关联原文证据`)}
-                    >
-                      查看本节证据 ({sec.evidenceIds.length})
-                    </button>
-                  )}
-                  {report.runId && !sec.pinned && (
-                    <button
-                      type="button"
-                      className="ds-btn ds-btn--quiet"
-                      style={{ fontSize: 11.5 }}
-                      disabled={runActionMut.isPending}
-                      onClick={async () => {
-                        setRegenNotice(null);
-                        await runActionMut.mutateAsync({
-                          id: report.runId!,
-                          body: { action: 'regenerate_section', sectionId: sec.id },
-                        });
-                        setRegenNotice(`已触发重新整理“${sec.title}”，完成后将自动更新报告版本。`);
-                        onNavigate(`/reports/runs/${encodeURIComponent(report.runId!)}`);
-                      }}
-                    >
-                      <RefreshCw size={11} />
-                      <span>重整理本节</span>
-                    </button>
-                  )}
-                </div>
+              <div className="seg" role="tablist" aria-label="按观点类型筛选">
+                {(
+                  [
+                    ['all', '全部观点'],
+                    ['observation', '观察事实'],
+                    ['interpretation', '分析解读'],
+                    ['hypothesis', '待验证假设'],
+                    ['recommendation', '业务建议'],
+                  ] as const
+                ).map(([k, lbl]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    role="tab"
+                    aria-selected={kindFilter === k}
+                    className={kindFilter === k ? 'on' : ''}
+                    onClick={() => setKindFilter(k)}
+                  >
+                    {lbl}
+                  </button>
+                ))}
               </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="search"
+                  className="wb-input"
+                  style={{ width: 210, height: 30, fontSize: 12 }}
+                  value={findingQuery}
+                  onChange={(e) => setFindingQuery(e.target.value)}
+                  placeholder="检索报告观点与关键词…"
+                />
+                {(kindFilter !== 'all' || findingQuery.trim()) && (
+                  <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+                    {matchedFindingsCount} / {totalFindingsCount} 条
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
 
-              <p style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--ink)', margin: 0 }}>
-                {sec.narrative?.summary || sec.stateMessage}
-              </p>
+          {/* Sections */}
+          {report.sections.map((sec, idx) => {
+            const isExec = sec.id === 'executive_summary';
+            const paragraphs = splitReadableParagraphs(sec.narrative?.summary || sec.stateMessage);
+            const q = findingQuery.trim().toLowerCase();
+            const visibleFindings = (sec.narrative?.findings ?? []).filter(
+              (f) =>
+                (kindFilter === 'all' || f.kind === kindFilter) &&
+                (!q || `${f.title} ${f.text}`.toLowerCase().includes(q)),
+            );
 
-              {/* KPI Metrics */}
-              {sec.metrics.length > 0 && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
-                  {sec.metrics.map((m) => (
-                    <div key={m.id} style={{ padding: '10px 12px', background: '#f8fafc', border: '1px solid var(--line)', borderRadius: 8 }}>
-                      <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{m.label}</div>
-                      <div style={{ fontSize: 19, fontWeight: 700, marginTop: 2 }}>
-                        {m.formatted}
-                        {m.unit && <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--muted)', marginLeft: 4 }}>{m.unit}</span>}
-                      </div>
-                      {m.denominator && <div style={{ fontSize: 10.5, color: 'var(--faint)', marginTop: 2 }}>口径：{m.denominator}</div>}
+            return (
+              <section
+                key={sec.id}
+                id={`report-sec-${sec.id}`}
+                style={{ borderBottom: '1px solid var(--line)', paddingBottom: 24, display: 'grid', gap: 12 }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', color: 'var(--wb-purple-deep)' }}>
+                      CHAPTER {String(idx + 1).padStart(2, '0')}
                     </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Charts */}
-              {sec.charts.map((ch) => (
-                <ReportChartRenderer key={ch.id} chart={ch} onSelectEvidence={openEvidence} />
-              ))}
-
-              {/* Verified Findings */}
-              {sec.narrative?.findings && sec.narrative.findings.length > 0 && (
-                <div style={{ display: 'grid', gap: 8, marginTop: 4 }}>
-                  {sec.narrative.findings.map((f, fi) => {
-                    const meta = KIND_LABELS[f.kind] ?? { label: f.kind, color: '#475569' };
-                    return (
-                      <div
-                        key={fi}
-                        style={{
-                          padding: '10px 14px',
-                          border: '1px solid var(--line)',
-                          borderLeft: `3.5px solid ${meta.color}`,
-                          borderRadius: 8,
-                          background: '#fcfefd',
+                    <h2 style={{ fontSize: 19, fontWeight: 750, margin: '3px 0 0' }}>
+                      {sec.narrative?.heading || sec.title}
+                    </h2>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {sec.evidenceIds.length > 0 && (
+                      <button
+                        type="button"
+                        className="ds-btn ds-btn--ghost"
+                        style={{ fontSize: 11.5 }}
+                        onClick={() => openEvidence(sec.evidenceIds, `${sec.title} · 关联原文证据`)}
+                      >
+                        查看本节证据 ({sec.evidenceIds.length})
+                      </button>
+                    )}
+                    {report.runId && !sec.pinned && (
+                      <button
+                        type="button"
+                        className="ds-btn ds-btn--quiet"
+                        style={{ fontSize: 11.5 }}
+                        disabled={runActionMut.isPending}
+                        onClick={async () => {
+                          setRegenNotice(null);
+                          await runActionMut.mutateAsync({
+                            id: report.runId!,
+                            body: { action: 'regenerate_section', sectionId: sec.id },
+                          });
+                          setRegenNotice(`已触发重新整理“${sec.title}”，完成后将自动更新报告版本。`);
+                          onNavigate(`/reports/runs/${encodeURIComponent(report.runId!)}`);
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                          <span className="tag" style={{ fontSize: 10.5 }}>{meta.label}</span>
-                          <strong style={{ fontSize: 13.5 }}>{f.title}</strong>
-                        </div>
-                        <p style={{ margin: 0, fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.6 }}>{f.text}</p>
-                        {f.evidenceIds.length > 0 && (
-                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6, alignItems: 'center' }}>
-                            <span style={{ fontSize: 11, color: 'var(--muted)' }}>支持证据：</span>
-                            {f.evidenceIds.map((eid) => (
-                              <button
-                                key={eid}
-                                type="button"
-                                className="tag tag--mint"
-                                style={{ cursor: 'pointer', fontSize: 10.5, fontFamily: 'var(--font-mono)' }}
-                                onClick={() => openEvidence(f.evidenceIds, f.title)}
-                              >
-                                {eid}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                        <RefreshCw size={11} />
+                        <span>重整理本节</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
-              )}
 
-              {/* Limitations */}
-              {(sec.warnings.length > 0 || (sec.narrative?.limitations?.length ?? 0) > 0) && (
-                <div style={{ fontSize: 12, color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', padding: '8px 12px', borderRadius: 6 }}>
-                  <b>口径与局限：</b>
-                  {[...(sec.narrative?.limitations ?? []), ...sec.warnings].slice(0, 4).join('；')}
+                {/* Scannable Executive Callout / Readable Paragraphs */}
+                <div
+                  style={
+                    isExec
+                      ? {
+                          background: '#f0fdfa',
+                          borderLeft: '4px solid #0f766e',
+                          borderRadius: '0 10px 10px 0',
+                          padding: '14px 18px',
+                          display: 'grid',
+                          gap: 8,
+                          fontSize: 14.5,
+                          lineHeight: 1.78,
+                          color: 'var(--ink)',
+                        }
+                      : {
+                          display: 'grid',
+                          gap: 8,
+                          fontSize: 14.5,
+                          lineHeight: 1.78,
+                          color: 'var(--ink-2, var(--ink))',
+                          maxWidth: '76ch',
+                        }
+                  }
+                >
+                  {paragraphs.map((p, pi) => (
+                    <p key={pi} style={{ margin: 0 }}>
+                      {p}
+                    </p>
+                  ))}
                 </div>
-              )}
-            </section>
-          ))}
+
+                {/* Named Topic Labels Pills */}
+                {sec.narrative?.topicLabels && sec.narrative.topicLabels.length > 0 && (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span style={{ fontSize: 11.5, color: 'var(--muted)', fontWeight: 600 }}>核心主题归纳：</span>
+                    {sec.narrative.topicLabels.map((tl, ti) => (
+                      <button
+                        key={ti}
+                        type="button"
+                        className="tag tag--lilac"
+                        style={{ cursor: 'pointer', fontSize: 11.5 }}
+                        onClick={() => openEvidence(tl.evidenceIds, `主题「${tl.label}」关联证据`)}
+                      >
+                        {tl.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* KPI Metrics */}
+                {sec.metrics.length > 0 && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+                    {sec.metrics.map((m) => (
+                      <div
+                        key={m.id}
+                        style={{
+                          padding: '11px 14px',
+                          background: '#f8fafc',
+                          border: '1px solid var(--line)',
+                          borderTop: '3px solid #0f766e',
+                          borderRadius: 9,
+                        }}
+                      >
+                        <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{m.label}</div>
+                        <div style={{ fontSize: 20, fontWeight: 750, marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>
+                          {m.formatted}
+                          {m.unit && <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--muted)', marginLeft: 4 }}>{m.unit}</span>}
+                        </div>
+                        {m.denominator && <div style={{ fontSize: 10.5, color: 'var(--faint)', marginTop: 2 }}>口径：{m.denominator}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Charts */}
+                {sec.charts.map((ch) => (
+                  <ReportChartRenderer key={ch.id} chart={ch} onSelectEvidence={openEvidence} />
+                ))}
+
+                {/* Verified Findings */}
+                {visibleFindings.length > 0 && (
+                  <div style={{ display: 'grid', gap: 10, marginTop: 4 }}>
+                    {visibleFindings.map((f, fi) => {
+                      const meta = KIND_LABELS[f.kind] ?? { label: f.kind, color: '#475569', bg: '#f1f5f9' };
+                      return (
+                        <div
+                          key={fi}
+                          style={{
+                            padding: '12px 16px',
+                            border: '1px solid var(--line)',
+                            borderLeft: `4px solid ${meta.color}`,
+                            borderRadius: 9,
+                            background: '#fcfefd',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 650,
+                                padding: '2px 8px',
+                                borderRadius: 5,
+                                color: meta.color,
+                                background: meta.bg,
+                              }}
+                            >
+                              {meta.label}
+                            </span>
+                            <strong style={{ fontSize: 14, color: 'var(--ink)' }}>{f.title}</strong>
+                          </div>
+                          <p style={{ margin: 0, fontSize: 13.5, color: 'var(--ink-3)', lineHeight: 1.68 }}>{f.text}</p>
+                          {f.evidenceIds.length > 0 && (
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' }}>
+                              <span style={{ fontSize: 11, color: 'var(--muted)' }}>溯源证据：</span>
+                              {f.evidenceIds.map((eid) => (
+                                <button
+                                  key={eid}
+                                  type="button"
+                                  className="tag tag--mint"
+                                  style={{ cursor: 'pointer', fontSize: 10.5, fontFamily: 'var(--font-mono)' }}
+                                  onClick={() => openEvidence(f.evidenceIds, f.title)}
+                                >
+                                  {eid}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Limitations */}
+                {(sec.warnings.length > 0 || (sec.narrative?.limitations?.length ?? 0) > 0) && (
+                  <div style={{ fontSize: 12, color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', padding: '9px 13px', borderRadius: 8 }}>
+                    <b>口径与局限：</b>
+                    {[...(sec.narrative?.limitations ?? []), ...sec.warnings].slice(0, 4).join('；')}
+                  </div>
+                )}
+              </section>
+            );
+          })}
 
           {/* Collapsible Methodology & Technical Diagnostics */}
           <details style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '10px 14px', background: '#f8fafc' }}>
@@ -356,7 +599,7 @@ export function ReportDetailView({
         </article>
       </div>
 
-      {/* Slide-over Evidence Drawer */}
+      {/* Slide-over Evidence Drawer with Search */}
       {drawerState && (
         <div
           style={{
@@ -371,7 +614,7 @@ export function ReportDetailView({
         >
           <div
             style={{
-              width: 'min(520px, 94vw)',
+              width: 'min(540px, 94vw)',
               height: '100%',
               background: '#fff',
               boxShadow: '-8px 0 28px rgba(15,23,42,0.16)',
@@ -389,13 +632,34 @@ export function ReportDetailView({
                 <X size={16} />
               </button>
             </div>
+            <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', background: '#f8fafc', display: 'flex', gap: 8 }}>
+              <input
+                type="search"
+                className="wb-input"
+                style={{ flex: 1, height: 30, fontSize: 12 }}
+                value={drawerSearch}
+                onChange={(e) => setDrawerSearch(e.target.value)}
+                placeholder="在当前证据中搜索关键词或社区…"
+              />
+              <button
+                type="button"
+                className="ds-btn ds-btn--ghost"
+                style={{ height: 30, fontSize: 11.5 }}
+                onClick={() => {
+                  setDrawerSearch('');
+                  setDrawerState({ title: `本报告全部原文证据（${report.evidence.length} 条）`, items: report.evidence });
+                }}
+              >
+                全部 ({report.evidence.length})
+              </button>
+            </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'grid', gap: 10, alignContent: 'start' }}>
-              {drawerState.items.length === 0 ? (
+              {filteredDrawerItems.length === 0 ? (
                 <div style={{ padding: 20, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
-                  暂无可展示的原文证据快照。
+                  暂无匹配的原文证据快照。
                 </div>
               ) : (
-                drawerState.items.map((ev) => {
+                filteredDrawerItems.map((ev) => {
                   const href = safeHttpUrl(ev.url);
                   return (
                     <div key={ev.id} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 12, display: 'grid', gap: 6 }}>
@@ -423,22 +687,6 @@ export function ReportDetailView({
                   );
                 })
               )}
-            </div>
-            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-              <button
-                type="button"
-                className="ds-btn ds-btn--ghost"
-                onClick={() => {
-                  setDrawerState(null);
-                  onNavigate(report.projectId ? `/content?projectId=${encodeURIComponent(report.projectId)}` : '/content');
-                }}
-              >
-                <Search size={13} />
-                <span>打开原文检索</span>
-              </button>
-              <button type="button" className="ds-btn" onClick={() => setDrawerState(null)}>
-                返回当前章节
-              </button>
             </div>
           </div>
         </div>

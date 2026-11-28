@@ -8,6 +8,7 @@ import type {
 } from "../../../packages/contracts/src/reports";
 import type { ContentProvider } from "../../connectors/shared/content-provider.interface";
 import { fail } from "../../shared/errors";
+import { notifyChannel } from "../../platform/pg-notify";
 import { transaction } from "../../storage/db";
 import { getUserRoleStatus } from "../access/index";
 import type { ArchiveRuntimeFacade } from "../archive-analysis/index";
@@ -239,35 +240,37 @@ async function waitForCollectionJob(
   jobId: string,
   runId: string,
   maxWaitMs = 120_000,
-): Promise<{ status: string; batchId: string | null; insertedCount: number; error: string | null }> {
+): Promise<{ status: string; batchId: string | null; insertedCount: number; processedCount: number; error: string | null }> {
   const deadline = Date.now() + maxWaitMs;
   while (Date.now() < deadline) {
     if (await isRunCancelled(pool, runId)) {
-      return { status: "canceled", batchId: null, insertedCount: 0, error: "User cancelled" };
+      return { status: "canceled", batchId: null, insertedCount: 0, processedCount: 0, error: "User cancelled" };
     }
     const { rows: [job] } = await pool.query<{
       status: string;
-      items_inserted: number | null;
+      records_inserted: number | null;
+      records_processed: number | null;
       error: string | null;
       batch_id: string | null;
     }>(
-      `SELECT j.status, j.items_inserted, j.error,
+      `SELECT j.status, j.records_inserted, j.records_processed, j.error,
               (SELECT cb.id FROM collection_batch cb WHERE cb.job_id = j.id AND cb.discarded_at IS NULL LIMIT 1) AS batch_id
        FROM source_collection_job j WHERE j.id = $1`,
       [jobId],
     );
-    if (!job) return { status: "failed", batchId: null, insertedCount: 0, error: "Collection job not found" };
+    if (!job) return { status: "failed", batchId: null, insertedCount: 0, processedCount: 0, error: "Collection job not found" };
     if (["succeeded", "completed", "failed", "cancelled", "blocked"].includes(job.status)) {
       return {
         status: job.status,
         batchId: job.batch_id,
-        insertedCount: job.items_inserted ?? 0,
+        insertedCount: job.records_inserted ?? 0,
+        processedCount: job.records_processed ?? 0,
         error: job.error,
       };
     }
-    await new Promise((r) => setTimeout(r, 2500));
+    await new Promise((r) => setTimeout(r, 2000));
   }
-  return { status: "timeout", batchId: null, insertedCount: 0, error: "Collection job timed out" };
+  return { status: "timeout", batchId: null, insertedCount: 0, processedCount: 0, error: "Collection job timed out" };
 }
 
 export async function executeReportRun(
@@ -427,6 +430,9 @@ export async function executeReportRun(
             }),
           );
           const jobId = enqueued.jobId;
+          if (enqueued.created) {
+            await notifyChannel(pool, "collection_jobs_ready");
+          }
           await updateRunState(pool, runId, {
             stepProgress: { ...progress, stageIndex: 2, totalStages: 5, collectionJobId: jobId, collectionStatus: "running" },
           });
@@ -452,6 +458,8 @@ export async function executeReportRun(
           progress.collectionJobId = jobId;
           progress.collectionBatchId = outcome.batchId;
           progress.collectionInserted = outcome.insertedCount;
+          progress.collectionProcessed = outcome.processedCount;
+          progress.collectionZeroNew = outcome.insertedCount === 0 && outcome.processedCount === 0;
         } catch (colErr) {
           await updateRunState(pool, runId, {
             state: "needs_action",
@@ -511,21 +519,23 @@ export async function executeReportRun(
         });
       } else {
         if (!archiveRuntime) fail(503, "Analysis runtime unavailable");
+        const useCollectedProject = Boolean(plan.collectionAction?.enabled && projectId && batchIds.length > 0 && plan.primarySource !== "archive");
         const sourceMode =
           plan.primarySource === "archive"
             ? "archive"
-            : plan.primarySource === "project" && projectId
+            : useCollectedProject || (plan.primarySource === "project" && projectId)
               ? "project_content"
               : "live_content";
         const exploreRes = await archiveRuntime.runExplore(actor, {
           runId: `rep_${runId.replace(/-/g, "").slice(0, 16)}`,
-          query:
-            plan.englishQuery?.trim() ||
-            (sourceMode === "archive"
-              ? parsed.englishQuery || plan.topic
-              : parsed.pgTerms.length > 0
-                ? parsed.pgTerms.join(" OR ")
-                : plan.topic || ""),
+          query: useCollectedProject
+            ? ""
+            : plan.englishQuery?.trim() ||
+              (sourceMode === "archive"
+                ? parsed.englishQuery || plan.topic
+                : parsed.pgTerms.length > 0
+                  ? parsed.pgTerms.join(" OR ")
+                  : plan.topic || ""),
           sourceMode,
           projectId: sourceMode === "project_content" || (sourceMode === "archive" && archiveRefId) ? (projectId ?? undefined) : undefined,
           archiveRefId: sourceMode === "archive" ? (archiveRefId ?? undefined) : undefined,

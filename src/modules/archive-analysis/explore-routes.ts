@@ -338,9 +338,9 @@ async function loadAuthorizedPgDocuments(
   if (req.sourceMode === "project_content") {
     if (!req.projectId) fail(400, "project_id_required");
     const scope = await resolveProjectScope(pool, actor, req.projectId);
-    projectSourceIds = scope.source_ids;
-    projectFilter = scope.filter;
     batchMembership = "batchMembership" in scope ? scope.batchMembership : undefined;
+    projectSourceIds = batchMembership ? undefined : scope.source_ids;
+    projectFilter = scope.filter;
   } else {
     // AUTH-01: enforce private batch visibility on all non-project PG Explore queries
     batchMembership = contentVisibility(actor);
