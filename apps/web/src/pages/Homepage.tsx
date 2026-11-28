@@ -194,13 +194,165 @@ const STATS_DATA = [
   },
 ];
 
-const CHANNEL_PREVIEW_GROUPS = [
-  { group: 'AI 一手与研发 · AI Firsthand', descEn: 'Official lab blogs, research releases & engineering notes', descZh: '官方研究博客、一手模型发布与研发动态', color: 'var(--teal)' },
-  { group: '工程与基础 · Dev & Infra', descEn: 'Systems engineering, cloud infrastructure & developer tools', descZh: '基础架构、云原生与开发者工具讨论', color: 'var(--wisteria)' },
-  { group: '科技与数码 · Tech Media', descEn: 'Technology reporting and product launches across T1/T2 sources', descZh: 'T1/T2 科技媒体报道与产品动态', color: 'var(--teal)' },
-  { group: '科研与科普 · Science', descEn: 'Scientific preprints, journals & verified science journalism', descZh: '科研进展、学术期刊与科普来源', color: 'var(--wisteria)' },
-  { group: '热榜与趋势 · Social Trends', descEn: 'Cross-community momentum across Reddit, X, Bluesky & HN', descZh: 'Reddit、X、Bluesky 与 HN 跨平台热度讨论', color: 'var(--teal)' },
+interface ChannelShowcaseItem {
+  id: string;
+  category: 'news' | 'social';
+  titleZh: string;
+  titleEn: string;
+  badgeZh: string;
+  badgeEn: string;
+  descZh: string;
+  descEn: string;
+  tagsZh: string[];
+  tagsEn: string[];
+  footZh: string;
+  footEn: string;
+  accent: string;
+  tint: string;
+  wide?: boolean;
+  action: 'focus' | 'explore';
+}
+
+const CHANNEL_PREVIEW_GROUPS: ChannelShowcaseItem[] = [
+  {
+    id: 'ai-firsthand',
+    category: 'news',
+    titleZh: 'AI 一手与研发',
+    titleEn: 'AI Firsthand & Research',
+    badgeZh: 'T1 一手信源',
+    badgeEn: 'T1 Official',
+    descZh: '直连头部 AI 实验室官方博客与模型发布公告，实时追踪能力演进、评测数据与技术路线。',
+    descEn: 'Official AI lab blogs, model release notes, and benchmark updates tracked straight from the source.',
+    tagsZh: ['官方博客', '模型发布', '研发笔记'],
+    tagsEn: ['Official Blogs', 'Releases', 'Research'],
+    footZh: '支持 AI 资讯专题追踪',
+    footEn: 'Linked to AI News Center',
+    accent: '#287f75',
+    tint: '#e6f3ef',
+    action: 'focus',
+  },
+  {
+    id: 'dev-infra',
+    category: 'news',
+    titleZh: '工程与基础架构',
+    titleEn: 'Engineering & Infrastructure',
+    badgeZh: '高密度讨论',
+    badgeEn: 'Deep Tech',
+    descZh: '聚焦 Hacker News 与一线工程社区，捕捉云原生、开发者工具选型、性能瓶颈与真实实践反馈。',
+    descEn: 'Systems engineering, developer tools, cloud architecture, and real-world practitioner discussions.',
+    tagsZh: ['云原生', '开发工具', '系统实战'],
+    tagsEn: ['Cloud Native', 'DevTools', 'Systems'],
+    footZh: '多源印证 · 原文直达',
+    footEn: 'Cross-source verified',
+    accent: '#635599',
+    tint: '#f0edf8',
+    action: 'focus',
+  },
+  {
+    id: 'tech-media',
+    category: 'news',
+    titleZh: '科技与数码媒体',
+    titleEn: 'Tech & Consumer Media',
+    badgeZh: '多源去重聚合',
+    badgeEn: 'Deduplicated',
+    descZh: '覆盖 T1/T2 权威科技媒体与消费电子评测报道，将同一事件的多方报道自动归并为一条脉络。',
+    descEn: 'T1/T2 tech journalism and hardware coverage automatically clustered by underlying story.',
+    tagsZh: ['新品发布', '硬件评测', '产业动态'],
+    tagsEn: ['Launches', 'Reviews', 'Industry'],
+    footZh: '支持每日 08:00 自动简报',
+    footEn: 'Daily 08:00 digest ready',
+    accent: '#3c70a8',
+    tint: '#eaf1fa',
+    action: 'focus',
+  },
+  {
+    id: 'science-frontier',
+    category: 'news',
+    titleZh: '科研与前沿科普',
+    titleEn: 'Science & Frontier Research',
+    badgeZh: '可信学术来源',
+    badgeEn: 'Verified Science',
+    descZh: '聚合权威科研期刊、预印本与高质量科学报道，帮助研究团队在商业化之前洞察底层技术突破。',
+    descEn: 'Scientific journals, preprints, and verified science journalism surfacing early technical shifts.',
+    tagsZh: ['学术前沿', '期刊速递', '底层技术'],
+    tagsEn: ['Journals', 'Preprints', 'Deep Science'],
+    footZh: '来源分级清晰 · 可溯源原文',
+    footEn: 'Tiered & traceable sources',
+    accent: '#0f766e',
+    tint: '#e7f5f3',
+    wide: true,
+    action: 'focus',
+  },
+  {
+    id: 'social-trends',
+    category: 'social',
+    titleZh: '跨平台社媒与社区热榜',
+    titleEn: 'Cross-Platform Social & Communities',
+    badgeZh: '归档 + 实时补采',
+    badgeEn: 'Archive + Live API',
+    descZh: '打通 Reddit 3,149 万+ 历史归档与 X、Bluesky、HN 实时讨论，一站式洞察消费者痛点、口碑分化与突发声量峰值。',
+    descEn: 'Combine 31.5M+ Reddit archive posts with live X, Bluesky, and HN discussions to uncover buyer pain and momentum spikes.',
+    tagsZh: ['Reddit 归档', 'X 平台', 'Bluesky', '消费者痛点'],
+    tagsEn: ['Reddit Archive', 'X', 'Bluesky', 'Buyer Pain'],
+    footZh: '一键进入智能洞察探索与报告生成',
+    footEn: 'One-click Explore & Report generation',
+    accent: '#a5773e',
+    tint: '#f8f0e4',
+    wide: true,
+    action: 'explore',
+  },
 ];
+
+function ChannelCardIllustration({ id, accent }: { id: string; accent: string }) {
+  if (id === 'ai-firsthand') {
+    return (
+      <svg viewBox="0 0 48 48" className="hp-ch-svg" aria-hidden="true">
+        <circle cx="24" cy="24" r="14" fill="none" stroke={accent} strokeWidth="1.5" strokeDasharray="3 2.5" />
+        <path d="M24 12 L27 21 L36 24 L27 27 L24 36 L21 27 L12 24 L21 21 Z" fill={accent} opacity="0.88" />
+        <circle cx="36" cy="13" r="3" fill={accent} opacity="0.45" />
+      </svg>
+    );
+  }
+  if (id === 'dev-infra') {
+    return (
+      <svg viewBox="0 0 48 48" className="hp-ch-svg" aria-hidden="true">
+        <rect x="7" y="10" width="34" height="28" rx="5" fill="#ffffff" stroke={accent} strokeWidth="1.7" />
+        <path d="M7 17 H41" stroke={accent} strokeWidth="1.4" opacity="0.4" />
+        <circle cx="12" cy="13.5" r="1.4" fill={accent} />
+        <circle cx="16.5" cy="13.5" r="1.4" fill={accent} opacity="0.55" />
+        <path d="M14 24 L19 28 L14 32" fill="none" stroke={accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M23 31 H34" stroke={accent} strokeWidth="2" strokeLinecap="round" opacity="0.7" />
+      </svg>
+    );
+  }
+  if (id === 'tech-media') {
+    return (
+      <svg viewBox="0 0 48 48" className="hp-ch-svg" aria-hidden="true">
+        <rect x="8" y="9" width="32" height="30" rx="5" fill="#ffffff" stroke={accent} strokeWidth="1.7" />
+        <rect x="13" y="14" width="12" height="10" rx="2" fill={accent} opacity="0.25" />
+        <path d="M28 16 H35 M28 21 H34 M13 29 H35 M13 33.5 H27" stroke={accent} strokeWidth="2" strokeLinecap="round" opacity="0.85" />
+      </svg>
+    );
+  }
+  if (id === 'science-frontier') {
+    return (
+      <svg viewBox="0 0 48 48" className="hp-ch-svg" aria-hidden="true">
+        <ellipse cx="24" cy="24" rx="16" ry="7" transform="rotate(-30 24 24)" fill="none" stroke={accent} strokeWidth="1.6" />
+        <ellipse cx="24" cy="24" rx="16" ry="7" transform="rotate(30 24 24)" fill="none" stroke={accent} strokeWidth="1.6" opacity="0.7" />
+        <circle cx="24" cy="24" r="4" fill={accent} />
+        <circle cx="37" cy="17" r="2.4" fill={accent} opacity="0.65" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 48 48" className="hp-ch-svg" aria-hidden="true">
+      <rect x="7" y="10" width="34" height="28" rx="5" fill="#ffffff" stroke={accent} strokeWidth="1.6" />
+      <path d="M12 31 L19 25 L25 27 L32 17 L37 21" fill="none" stroke={accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="32" cy="17" r="3" fill={accent} />
+      <circle cx="19" cy="25" r="2.2" fill={accent} opacity="0.65" />
+    </svg>
+  );
+}
 
 const RESOURCES_DATA = [
   {
@@ -352,6 +504,7 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
 
   // Stats active row
   const [activeStat, setActiveStat] = useState(0);
+  const [channelFilter, setChannelFilter] = useState<'all' | 'news' | 'social'>('all');
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 24);
@@ -1005,11 +1158,10 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
       <section className="hp-logos-band hp-reveal" data-hp-reveal aria-label="Supported engines and data channels">
         {[
           { name: t('31.5M+ Reddit Archive', '3,149 万+ 离线归档'), dot: 'var(--purple)' },
-          { name: 'DuckDB + Potion INT8', dot: 'var(--teal)' },
-          { name: t('X · TwitterAPIs Live', 'X · 实时限额补采'), dot: '#527bc5' },
+          { name: t('API Live Bounded Collect', 'API 实时限额补采'), dot: '#527bc5' },
           { name: t('Signal Focus · RSS / HN', '信息聚焦 · RSS / HN'), dot: '#d68245' },
-          { name: t('DeepSeek Grounded LLM', 'DeepSeek 核验归纳'), dot: 'var(--purple)' },
-          { name: t('L1/L2/L3 Research Space', 'L1/L2/L3 专题研究'), dot: 'var(--teal)' },
+          { name: t('LLM Grounded Synthesis', 'LLM 核验归纳'), dot: 'var(--purple)' },
+          { name: t('Layered Topic Research', '智能分层专题研究'), dot: 'var(--teal)' },
           { name: t('Offline Interactive HTML', '单文件交互 HTML 导出'), dot: 'var(--ink)' },
         ].map((item) => (
           <div key={item.name} className="hp-source-emblem">
@@ -1210,23 +1362,89 @@ export function Homepage({ isAuthenticated, onOpenAuth, onEnterWorkbench, onGoFe
             </button>
           </div>
 
-          <div className="hp-leaderboard">
-            <div className="hp-lb-head">
-              <span>{t('Channel Group', '信息聚焦频道分组')}</span>
-              <span>{t('Scope', '覆盖范围')}</span>
-              <span className="hp-lb-meta">{t('Live counts in Signal Focus', '实时条数请查看信息聚焦')}</span>
-            </div>
-            {CHANNEL_PREVIEW_GROUPS.map((row) => (
-              <div key={row.group} className="hp-lb-row">
-                <span style={{ fontWeight: 500 }}>{row.group}</span>
-                <span style={{ fontSize: 12, opacity: 0.8 }}>
-                  {lang === 'zh' ? row.descZh : row.descEn}
-                </span>
-                <span style={{ fontSize: 11, color: row.color, fontWeight: 600 }}>
-                  {t('Configured', '已接入')}
-                </span>
+          <div className="hp-channel-showcase">
+            <div className="hp-ch-head">
+              <div>
+                <div className="hp-ch-eyebrow">{t('MULTI-SOURCE COVERAGE MATRIX', '全域信息聚焦与社媒阵地矩阵')}</div>
+                <h3>{t('5 Curated Signal Channels Ready for Instant Briefing & Exploration', '五大核心信息阵地，打通日常追踪与深度专题研究')}</h3>
               </div>
-            ))}
+              <div className="hp-ch-filters" role="tablist" aria-label={t('Filter channels', '筛选信息阵地类型')}>
+                {[
+                  { id: 'all' as const, label: t('All (5)', '全部阵地 (5)') },
+                  { id: 'news' as const, label: t('Curated News (4)', '一手资讯与媒体 (4)') },
+                  { id: 'social' as const, label: t('Social & Archive (1)', '社媒与社区归档 (1)') },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={channelFilter === tab.id}
+                    className={`hp-ch-filter-btn ${channelFilter === tab.id ? 'active' : ''}`}
+                    onClick={() => setChannelFilter(tab.id)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className={`hp-ch-grid ${channelFilter !== 'all' ? 'is-filtered' : ''}`}>
+              {CHANNEL_PREVIEW_GROUPS.filter((g) => channelFilter === 'all' || g.category === channelFilter).map((item) => (
+                <article
+                  key={item.id}
+                  className={`hp-ch-card ${item.wide && channelFilter === 'all' ? 'hp-ch-card--wide' : ''}`}
+                  style={{ '--ch-accent': item.accent, '--ch-tint': item.tint } as React.CSSProperties}
+                  onClick={() => (item.action === 'focus' && onGoFeed ? onGoFeed() : onEnterWorkbench('/explore'))}
+                >
+                  <div className="hp-ch-card-top">
+                    <div className="hp-ch-illus" style={{ background: item.tint }}>
+                      <ChannelCardIllustration id={item.id} accent={item.accent} />
+                    </div>
+                    <div className="hp-ch-titles">
+                      <div className="hp-ch-badge-row">
+                        <span className="hp-ch-badge" style={{ color: item.accent, background: item.tint }}>
+                          {lang === 'zh' ? item.badgeZh : item.badgeEn}
+                        </span>
+                        <span className="hp-ch-status">
+                          <i style={{ background: item.accent }} />
+                          {t('Active', '已接入')}
+                        </span>
+                      </div>
+                      <h4>{lang === 'zh' ? item.titleZh : item.titleEn}</h4>
+                    </div>
+                  </div>
+
+                  <p className="hp-ch-desc">{lang === 'zh' ? item.descZh : item.descEn}</p>
+
+                  <div className="hp-ch-tags">
+                    {(lang === 'zh' ? item.tagsZh : item.tagsEn).map((tag) => (
+                      <span key={tag}>{tag}</span>
+                    ))}
+                  </div>
+
+                  <div className="hp-ch-foot">
+                    <span>{lang === 'zh' ? item.footZh : item.footEn}</span>
+                    <span className="hp-ch-go">
+                      {item.action === 'focus' ? t('View Focus', '进入聚焦') : t('Explore', '立即探索')}
+                      <ArrowUpRight size={13} />
+                    </span>
+                  </div>
+                </article>
+              ))}
+            </div>
+
+            <div className="hp-ch-bottom-bar">
+              <div className="hp-ch-flow">
+                <span>① {t('Multi-source deduplication', '多源去重聚合')}</span>
+                <span className="hp-ch-flow-sep">→</span>
+                <span>② {t('Tiered credibility & rising terms', '来源分级与热词升温')}</span>
+                <span className="hp-ch-flow-sep">→</span>
+                <span>③ {t('One-click briefing or deep explore', '一键转行业简报或智能探索')}</span>
+              </div>
+              <span className="hp-ch-live-note">
+                {t('Live counts available inside Signal Focus', '实时更新条数与原文请进入「信息聚焦」查看')}
+              </span>
+            </div>
           </div>
         </div>
       </section>
