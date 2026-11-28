@@ -7,6 +7,7 @@ import {
   Flame,
   Info,
   Layers,
+  MousePointerClick,
   PieChart,
   Tag,
 } from 'lucide-react';
@@ -228,7 +229,7 @@ export function ChannelInsightsPanel({
               </Badge>
             </div>
             <p className="ci-card-sub">
-              {t('Unique story document frequency · click bar to filter', '去重事件提及数 · 点击条形筛选下方列表')}
+              {t('Unique story document frequency', '去重事件提及数')}
             </p>
           </CardHeader>
           <CardContent className="ci-card-body">
@@ -287,7 +288,7 @@ export function ChannelInsightsPanel({
                     `${insights.composition.allParticipatingSourceCount} participating sources (incl. corroborated)`,
                     `共 ${insights.composition.allParticipatingSourceCount} 个来源参与报道（含合并印证）`,
                   )
-                : t('Share of deduplicated events · click bar to filter', '去重事件构成占比 · 点击条形筛选')}
+                : t('Share of deduplicated events', '去重事件构成占比')}
             </p>
           </CardHeader>
           <CardContent className="ci-card-body">
@@ -373,7 +374,7 @@ export function ChannelInsightsPanel({
             {insights.topics.qualityNote ??
               t(
                 `${insights.topics.clusterCount} clusters covering ${insights.topics.assignedCount} stories`,
-                `自动归纳 ${insights.topics.clusterCount} 个主题 · 点击色块定位关联事件`,
+                `自动归纳 ${insights.topics.clusterCount} 个主题`,
               )}
           </p>
         </CardHeader>
@@ -509,6 +510,10 @@ export function ChannelInsightsPanel({
                   </div>
                 </TooltipContent>
               </Tooltip>
+              <span className="ci-interact-tip">
+                <MousePointerClick size={12} />
+                <span>{t('Click any chart to filter stories', '点击图表可以进行筛选交互')}</span>
+              </span>
             </div>
 
             <div className="ci-head-right">

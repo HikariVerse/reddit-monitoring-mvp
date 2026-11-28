@@ -2893,6 +2893,20 @@
   background: var(--surface-2, #f1f3ee);
 }
 
+.ci-interact-tip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 6px;
+  background: var(--wb-tint, #edf6f3);
+  border: 1px solid rgba(40, 127, 117, 0.22);
+  color: var(--wb-teal, #1f6f66);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
 .ci-head-right {
   display: inline-flex;
   align-items: center;
